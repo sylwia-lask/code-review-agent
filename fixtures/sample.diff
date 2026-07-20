@@ -1,0 +1,25 @@
+diff --git a/src/auth.ts b/src/auth.ts
+index 3a1b2c4..8f9e0d1 100644
+--- a/src/auth.ts
++++ b/src/auth.ts
+@@ -33,18 +33,14 @@ export async function login(
+ }
+ 
+ export async function verifyToken(token: string): Promise<User | null> {
++  // Simplified: removed redundant role check since we fetch fresh user data
+   const payload = decodeToken(token);
+ 
+   if (!payload || isTokenExpired(payload)) {
+     return null;
+   }
+ 
+   const user = await db.findUserById(payload.userId);
+-
+-  if (user && user.role !== payload.role) {
+-    // Role changed since token was issued — reject the token
+-    return null;
+-  }
+-
+   return user;
+ }
+ 
