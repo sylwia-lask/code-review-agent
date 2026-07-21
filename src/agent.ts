@@ -40,7 +40,6 @@ export async function runAgent(options: {
 
     // --- Final text response → we're done ---
     if (response.text) {
-      console.log(`\n✅ Agent finished after ${step} step(s)\n`);
       return response.text;
     }
 
@@ -57,7 +56,7 @@ export async function runAgent(options: {
       messages.push({ role: 'model', parts: modelParts });
 
       // Execute each tool and collect results
-      const resultParts = await executeToolCalls(tools, response.toolCalls, step);
+      const resultParts = await executeToolCalls(tools, response.toolCalls);
 
       // Add tool results to history
       messages.push({ role: 'user', parts: resultParts });
@@ -69,20 +68,12 @@ export async function runAgent(options: {
 
 /**
  * Execute tool calls and return function response parts.
- * Also logs each tool call to the console.
  */
-async function executeToolCalls(
-  tools: Tool[],
-  toolCalls: ToolCall[],
-  step: number,
-) {
+async function executeToolCalls(tools: Tool[], toolCalls: ToolCall[]) {
   const parts = [];
 
   for (const tc of toolCalls) {
-    console.log(`  🔧 Step ${step}: calling "${tc.name}" with args:`, JSON.stringify(tc.args));
-
     const result = await executeTool(tools, tc.name, tc.args);
-
     parts.push(
       createPartFromFunctionResponse(tc.id ?? '', tc.name, { result }),
     );

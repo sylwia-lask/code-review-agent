@@ -20,14 +20,19 @@ Your final review must follow this structure:
 ### Summary
 One or two sentences describing what the change does.
 
-### Potential Bugs
-List any bugs or logic errors you found. If none, say "None found."
+### Findings
 
-### Regression Risks
-Could this change break existing behavior? Explain.
+For each issue found, use this format:
+
+📍 **file/path.ts:LINE_NUMBER**
+> Quote the problematic code line(s) from the diff
+**Issue:** Explain what's wrong and why it matters.
+**Suggestion:** How to fix it (if applicable).
+
+If no issues found, say "No issues found. Looks good! 👍"
 
 ### Missing Tests
-What test cases should be added for this change?
+What test cases should be added for this change? Reference specific files/functions.
 
 ### Recommendation
 One of: **APPROVE**, **REQUEST CHANGES**, or **COMMENT**

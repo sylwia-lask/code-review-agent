@@ -6,7 +6,7 @@ import type { Tool } from '../tools.js';
 /**
  * Tool: getFile
  *
- * Reads a file from the sample repository.
+ * Reads a file from the current repository.
  * The agent uses this to get additional context beyond the diff.
  */
 export const getFileTool: Tool = {
@@ -19,19 +19,14 @@ export const getFileTool: Tool = {
       path: {
         type: Type.STRING,
         description:
-          'Path to the file relative to the repository root, e.g. "src/auth.ts"',
+          'Path to the file relative to the repository root, e.g. "src/agent.ts"',
       },
     },
     required: ['path'],
   },
   execute: async (args) => {
     const filePath = args.path as string;
-    const fullPath = resolve(
-      process.cwd(),
-      'fixtures',
-      'sample-repo',
-      filePath,
-    );
+    const fullPath = resolve(process.cwd(), filePath);
 
     try {
       const content = await readFile(fullPath, 'utf-8');

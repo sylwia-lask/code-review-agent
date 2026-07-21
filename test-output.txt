@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 C:/projects/code-review-agent
+
+
+ Test Files  3 passed (3)
+      Tests  7 passed (7)
+   Start at  09:48:12
+   Duration  809ms (transform 162ms, setup 0ms, import 742ms, tests 289ms, environment 0ms)
+

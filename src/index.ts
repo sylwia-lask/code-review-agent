@@ -22,16 +22,13 @@ const tools = [getDiffTool, getFileTool];
 
 // --- Run the agent ---
 async function main() {
-  console.log('🤖 Starting code review agent (Steve)...\n');
-
   const review = await runAgent({
     llm,
     tools,
     systemPrompt: REVIEWER_SYSTEM_PROMPT,
-    userMessage: 'Please review the latest code changes.',
+    userMessage: 'Please review the current git diff.',
   });
 
-  console.log('--- CODE REVIEW ---\n');
   console.log(review);
 }
 
