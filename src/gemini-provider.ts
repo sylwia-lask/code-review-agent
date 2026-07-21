@@ -83,6 +83,12 @@ export class GeminiProvider implements LlmProvider {
     const rawParts = response.candidates?.[0]?.content?.parts ?? [];
 
     if (functionCalls && functionCalls.length > 0) {
+      // Extract any text the model said alongside tool calls (inner monologue)
+      const thinkingParts = rawParts
+        .filter((p) => p.text && !p.thought)
+        .map((p) => p.text);
+      const thinking = thinkingParts.join(' ').trim() || undefined;
+
       return {
         toolCalls: functionCalls.map((fc) => ({
           id: fc.id,
@@ -90,6 +96,7 @@ export class GeminiProvider implements LlmProvider {
           args: fc.args ?? {},
         })),
         rawParts,
+        thinking,
       };
     }
 

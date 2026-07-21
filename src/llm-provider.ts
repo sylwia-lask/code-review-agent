@@ -20,6 +20,8 @@ export interface LlmResponse {
   toolCalls?: ToolCall[];
   /** Raw model parts — must be stored in history as-is to preserve thoughtSignature */
   rawParts?: Part[];
+  /** Any text the model said alongside tool calls (inner monologue / thinking out loud) */
+  thinking?: string;
 }
 
 /**

@@ -35,7 +35,7 @@ export async function runAgent(options: {
     { role: 'user', parts: [{ text: userMessage }] },
   ];
 
-  for (let step = 1; step <= maxIterations; step++) {
+  for (let step = 0; step < maxIterations; step++) {
     const response = await llm.chat(messages, declarations, systemPrompt);
 
     // --- Final text response → we're done ---
@@ -45,6 +45,11 @@ export async function runAgent(options: {
 
     // --- Tool calls → execute and loop ---
     if (response.toolCalls) {
+      // Print Steve's inner monologue if the model said something
+      if (response.thinking) {
+        console.log(`\n  💭 ${response.thinking}\n`);
+      }
+
       // Add the model's response to history — using rawParts to preserve
       // thoughtSignature (required by Gemini 3 for function calling)
       const modelParts: Part[] =
@@ -55,8 +60,8 @@ export async function runAgent(options: {
 
       messages.push({ role: 'model', parts: modelParts });
 
-      // Execute each tool and collect results
-      const resultParts = await executeToolCalls(tools, response.toolCalls);
+      // Execute each tool and log the step
+      const resultParts = await executeToolCalls(tools, response.toolCalls, step);
 
       // Add tool results to history
       messages.push({ role: 'user', parts: resultParts });
@@ -69,10 +74,13 @@ export async function runAgent(options: {
 /**
  * Execute tool calls and return function response parts.
  */
-async function executeToolCalls(tools: Tool[], toolCalls: ToolCall[]) {
+async function executeToolCalls(tools: Tool[], toolCalls: ToolCall[], step: number) {
   const parts = [];
 
   for (const tc of toolCalls) {
+    const argsStr = Object.keys(tc.args).length > 0 ? `(${JSON.stringify(tc.args)})` : '';
+    console.log(`  [step ${step}] ${tc.name}${argsStr}`);
+
     const result = await executeTool(tools, tc.name, tc.args);
     parts.push(
       createPartFromFunctionResponse(tc.id ?? '', tc.name, { result }),
