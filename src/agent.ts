@@ -6,6 +6,7 @@ import {
 } from '@google/genai';
 import type { LlmProvider, ToolCall } from './llm-provider.js';
 import { executeTool, toFunctionDeclarations, type Tool } from './tools.js';
+import { colors, printStep } from './colors.js';
 
 /**
  * Minimal agent loop.
@@ -35,7 +36,7 @@ export async function runAgent(options: {
     { role: 'user', parts: [{ text: userMessage }] },
   ];
 
-  for (let step = 0; step < maxIterations; step++) {
+  for (let step = 1; step <= maxIterations; step++) {
     const response = await llm.chat(messages, declarations, systemPrompt);
 
     // --- Final text response → we're done ---
@@ -47,7 +48,7 @@ export async function runAgent(options: {
     if (response.toolCalls) {
       // Print Steve's inner monologue if the model said something
       if (response.thinking) {
-        console.log(`\n  💭 ${response.thinking}\n`);
+        console.log(colors.dim(`\n  💭 ${response.thinking}\n`));
       }
 
       // Add the model's response to history — using rawParts to preserve
@@ -78,8 +79,7 @@ async function executeToolCalls(tools: Tool[], toolCalls: ToolCall[], step: numb
   const parts = [];
 
   for (const tc of toolCalls) {
-    const argsStr = Object.keys(tc.args).length > 0 ? `(${JSON.stringify(tc.args)})` : '';
-    console.log(`  [step ${step}] ${tc.name}${argsStr}`);
+    printStep(step, tc.name, tc.args);
 
     const result = await executeTool(tools, tc.name, tc.args);
     parts.push(

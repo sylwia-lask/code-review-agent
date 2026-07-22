@@ -4,6 +4,8 @@ import { runAgent } from './agent.js';
 import { REVIEWER_SYSTEM_PROMPT } from './prompts.js';
 import { getDiffTool } from './tools/get-diff.js';
 import { getFileTool } from './tools/get-file.js';
+import { listFilesTool } from './tools/list-files.js';
+import { printHeader, printReview } from './colors.js';
 
 // --- Configuration ---
 const apiKey = process.env.GEMINI_API_KEY;
@@ -18,11 +20,11 @@ if (!apiKey) {
 const llm = new GeminiProvider(apiKey, model);
 
 // --- Register tools ---
-const tools = [getDiffTool, getFileTool];
+const tools = [getDiffTool, getFileTool, listFilesTool];
 
 // --- Run the agent ---
 async function main() {
-  console.log('🤖 Code Review Agent\n');
+  printHeader('Code Review Agent');
 
   const review = await runAgent({
     llm,
@@ -31,8 +33,8 @@ async function main() {
     userMessage: 'Please review the current git diff.',
   });
 
-  console.log('\n--- Review Complete ---\n');
-  console.log(review);
+  printHeader('Review Complete');
+  printReview(review);
 }
 
 main();
