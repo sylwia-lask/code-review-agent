@@ -2,6 +2,7 @@ import { readFile } from 'fs/promises';
 import { resolve } from 'path';
 import { Type } from '@google/genai';
 import type { Tool } from '../tools.js';
+import { isPathSafe } from '../tools.js';
 
 /**
  * Tool: getFile
@@ -26,6 +27,11 @@ export const getFileTool: Tool = {
   },
   execute: async (args) => {
     const filePath = args.path as string;
+
+    if (!isPathSafe(filePath)) {
+      return `Error: access denied — "${filePath}" is outside the repository`;
+    }
+
     const fullPath = resolve(process.cwd(), filePath);
 
     try {
