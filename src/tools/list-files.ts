@@ -2,6 +2,7 @@ import { readdirSync } from 'fs';
 import { resolve } from 'path';
 import { Type } from '@google/genai';
 import type { Tool } from '../tools.js';
+import { isPathSafe } from '../tools.js';
 
 /**
  * Tool: listFiles
@@ -26,6 +27,11 @@ export const listFilesTool: Tool = {
   },
   execute: async (args) => {
     const dirPath = args.path as string;
+
+    if (!isPathSafe(dirPath)) {
+      return `Error: access denied — "${dirPath}" is outside the repository`;
+    }
+
     const fullPath = resolve(process.cwd(), dirPath);
 
     try {

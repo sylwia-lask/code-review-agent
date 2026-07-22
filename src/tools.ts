@@ -1,3 +1,4 @@
+import { resolve } from 'path';
 import type { FunctionDeclaration } from '@google/genai';
 
 /**
@@ -45,3 +46,22 @@ export async function executeTool(
 
   return tool.execute(args);
 }
+
+/**
+ * Validate that a file/directory path doesn't escape the repository root.
+ * Returns true if the path is safe to access.
+ */
+export function isPathSafe(inputPath: string): boolean {
+  const repoRoot = process.cwd();
+  const resolved = resolve(repoRoot, inputPath);
+
+  // Ensure resolved path is within repo root (add separator to prevent
+  // prefix attacks like "/repo" matching "/repomalware")
+  return resolved === repoRoot || resolved.startsWith(repoRoot + '/') || resolved.startsWith(repoRoot + '\\');
+}
+
+/**
+ * Maximum characters for a diff before it gets truncated.
+ * Large diffs can overwhelm the model's context window.
+ */
+export const MAX_DIFF_LENGTH = 10_000;

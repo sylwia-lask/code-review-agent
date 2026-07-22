@@ -1,12 +1,13 @@
 import { execSync } from 'child_process';
 import { Type } from '@google/genai';
 import type { Tool } from '../tools.js';
+import { MAX_DIFF_LENGTH } from '../tools.js';
 
 /**
  * Tool: getDiff
  *
  * Runs `git diff` on the current repository and returns the result.
- * Shows staged + unstaged changes by default.
+ * Shows staged + unstaged changes. Truncates very large diffs.
  */
 export const getDiffTool: Tool = {
   name: 'getDiff',
@@ -24,6 +25,11 @@ export const getDiffTool: Tool = {
 
       if (!diff.trim()) {
         return 'No changes detected. The working tree is clean.';
+      }
+
+      // Truncate oversized diffs to avoid blowing the context window
+      if (diff.length > MAX_DIFF_LENGTH) {
+        return diff.slice(0, MAX_DIFF_LENGTH) + '\n\n[... diff truncated ...]';
       }
 
       return diff;
