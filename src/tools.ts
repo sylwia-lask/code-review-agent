@@ -15,6 +15,12 @@ export interface Tool {
   description: string;
   parameters: FunctionDeclaration['parameters'];
   execute: (args: Record<string, unknown>) => Promise<string>;
+  /**
+   * Marks a tool as an HR action (provided via the MCP server). Purely for CLI
+   * presentation — the agent loop highlights these steps and prints their
+   * results so every HR action is visible. Has no effect on tool execution.
+   */
+  isHrAction?: boolean;
 }
 
 /**

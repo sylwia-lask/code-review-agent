@@ -6,7 +6,7 @@ import {
 } from '@google/genai';
 import type { LlmProvider, ToolCall } from './llm-provider.js';
 import { executeTool, toFunctionDeclarations, type Tool } from './tools.js';
-import { colors, printStep } from './colors.js';
+import { colors, printStep, printHrResult } from './colors.js';
 
 /**
  * Minimal agent loop.
@@ -79,9 +79,18 @@ async function executeToolCalls(tools: Tool[], toolCalls: ToolCall[], step: numb
   const parts = [];
 
   for (const tc of toolCalls) {
-    printStep(step, tc.name, tc.args);
+    const tool = tools.find((t) => t.name === tc.name);
+    const isHrAction = tool?.isHrAction ?? false;
+
+    printStep(step, tc.name, tc.args, isHrAction);
 
     const result = await executeTool(tools, tc.name, tc.args);
+
+    // Make every HR action visible in the CLI, including its result.
+    if (isHrAction) {
+      printHrResult(result);
+    }
+
     parts.push(
       createPartFromFunctionResponse(tc.id ?? '', tc.name, { result }),
     );

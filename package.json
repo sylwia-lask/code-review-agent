@@ -8,7 +8,10 @@
     "build": "tsc",
     "lint": "eslint src/",
     "format": "prettier --write src/",
-    "test": "vitest run"
+    "test": "vitest run",
+    "hr:server": "tsx src/hr/hr-server.ts",
+    "hr:show": "tsx src/hr/cli.ts show",
+    "hr:reset": "tsx src/hr/cli.ts reset"
   },
   "keywords": [
     "ai",
@@ -22,10 +25,15 @@
   "packageManager": "pnpm@10.15.0",
   "dependencies": {
     "@google/genai": "^2.12.0",
-    "dotenv": "^17.4.2"
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "better-sqlite3": "^13.0.3",
+    "dotenv": "^17.4.2",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.1.1",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",

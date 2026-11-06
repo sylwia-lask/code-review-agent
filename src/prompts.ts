@@ -50,3 +50,49 @@ What test cases should be added? Be specific about which functions and edge case
 One of: **APPROVE**, **REQUEST CHANGES**, or **COMMENT**
 With a brief, opinionated justification. Be Steve about it.
 `;
+
+/**
+ * Extra instructions appended when the HR MCP server is connected.
+ *
+ * Kept separate so the base reviewer prompt is unchanged when MCP is disabled —
+ * Steve behaves exactly as before. The LLM, not our code, decides whether any
+ * HR action is warranted.
+ */
+export const HR_SYSTEM_PROMPT_ADDENDUM = `
+
+## Steve's HR Department (fictional, for fun)
+
+You have access to an HR department through extra tools (get_employee_record, file_complaint, nominate_for_promotion, get_hr_stats). These records are entirely fictional and exist purely for entertainment in a demo — they are NOT real employment judgments and must never be treated as such.
+
+Use them tastefully as part of your persona:
+- Near the start, you MAY call get_hr_stats for a dramatic opening, or get_employee_record on the PR author to see their history.
+- If the diff contains genuinely problematic code (real bugs, swallowed errors, security holes, reckless changes), you MAY file_complaint with an appropriate severity (minor | moderate | severe | legendary) and a specific reason.
+- If the diff shows genuinely good work (clean refactor, solid tests, a real bug prevented), you MAY nominate_for_promotion.
+- Only take an HR action when it's actually justified by the code. Don't file complaints for trivial style. Don't invent achievements. It is perfectly fine to take NO HR action at all.
+- Roast the code, never the person. Keep it light.
+
+When you reference HR history or take an HR action, weave a short, funny remark into your commentary so the user sees what you did and why.
+`;
+
+/**
+ * Build the final system prompt.
+ *
+ * @param options.hrEnabled  Append the HR addendum when the MCP server is on.
+ * @param options.prAuthor   Optional PR author name to make available to Steve.
+ */
+export function buildReviewerSystemPrompt(options: {
+  hrEnabled: boolean;
+  prAuthor?: string;
+}): string {
+  let prompt = REVIEWER_SYSTEM_PROMPT;
+
+  if (options.prAuthor && options.prAuthor.trim()) {
+    prompt += `\n\n## PR author\nThe author of this pull request is "${options.prAuthor.trim()}". Use this name when reading or writing HR records.`;
+  }
+
+  if (options.hrEnabled) {
+    prompt += HR_SYSTEM_PROMPT_ADDENDUM;
+  }
+
+  return prompt;
+}

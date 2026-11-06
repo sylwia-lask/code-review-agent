@@ -1,3 +1,6 @@
 node_modules/
 dist/
 .env
+
+# Steve's HR Department — local SQLite demo data (never commit)
+.hr-data/

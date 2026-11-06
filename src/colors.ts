@@ -29,14 +29,39 @@ export function printHeader(text: string): void {
 
 /**
  * Print a step indicator for tool calls.
+ *
+ * HR tools (from the MCP server) are highlighted so every HR action is clearly
+ * visible in the CLI output, separate from ordinary code-reading tools.
  */
-export function printStep(step: number, toolName: string, args: Record<string, unknown>): void {
+export function printStep(
+  step: number,
+  toolName: string,
+  args: Record<string, unknown>,
+  isHrAction = false,
+): void {
   const argsStr = Object.keys(args).length > 0 ? JSON.stringify(args) : '';
+
+  if (isHrAction) {
+    console.log(
+      colors.dim(`  [step ${step}]`) + ' ' +
+      colors.bold(colors.cyan(`🧑‍💼 HR → ${toolName}`)) +
+      (argsStr ? colors.dim(`(${argsStr})`) : ''),
+    );
+    return;
+  }
+
   console.log(
     colors.dim(`  [step ${step}]`) + ' ' +
     colors.magenta(toolName) +
     (argsStr ? colors.dim(`(${argsStr})`) : ''),
   );
+}
+
+/**
+ * Print the result of an HR action so it's unmistakable in the output.
+ */
+export function printHrResult(result: string): void {
+  console.log(colors.cyan('    ↳ ') + colors.dim(result.replace(/\n/g, '\n      ')));
 }
 
 /**
