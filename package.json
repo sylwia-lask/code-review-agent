@@ -9,9 +9,9 @@
     "lint": "eslint src/",
     "format": "prettier --write src/",
     "test": "vitest run",
-    "hr:server": "tsx src/hr/hr-server.ts",
-    "hr:show": "tsx src/hr/cli.ts show",
-    "hr:reset": "tsx src/hr/cli.ts reset"
+    "hr:server": "tsx hr-server/hr-server.ts",
+    "hr:show": "tsx hr-server/cli.ts show",
+    "hr:reset": "tsx hr-server/cli.ts reset"
   },
   "keywords": [
     "ai",

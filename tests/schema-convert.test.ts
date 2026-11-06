@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Type } from '@google/genai';
-import { mcpInputSchemaToGemini } from '../src/hr/schema-convert.js';
+import { mcpInputSchemaToGemini } from '../src/mcp/schema-convert.js';
 
 /**
  * Tests for the JSON Schema -> Gemini Schema converter. This is the bridge that

@@ -21,7 +21,7 @@ Steve is the reviewer persona. He's a sarcastic senior engineer who's seen too m
 ## Project structure
 
 ```
-src/
+src/                      ← the agent (the AI side)
 ├── index.ts              ← entry point
 ├── agent.ts              ← the agent loop (core of the project)
 ├── llm-provider.ts       ← LLM interface (swap Gemini for OpenAI/Anthropic/Ollama)
@@ -33,15 +33,22 @@ src/
 │   ├── get-diff.ts       ← tool: run git diff
 │   ├── get-file.ts       ← tool: read a file from the repo
 │   └── list-files.ts     ← tool: list a directory
-└── hr/                   ← Steve's HR Department (MCP bolt-on)
-    ├── hr-db.ts          ← SQLite persistence (no AI, no MCP)
-    ├── hr-server.ts      ← MCP server: 4 HR tools over stdio
-    ├── hr-mcp-client.ts  ← MCP client: discovers + wraps tools for the agent
-    ├── schema-convert.ts ← JSON Schema → Gemini parameter schema
-    └── cli.ts            ← inspect / reset the HR database
+└── mcp/                  ← the MCP client (how the agent *consumes* MCP)
+    ├── hr-mcp-client.ts  ← connects to the server, wraps tools for the agent
+    └── schema-convert.ts ← JSON Schema → Gemini parameter schema
+
+hr-server/                ← the MCP server, a standalone unit (no AI, no agent)
+├── hr-server.ts          ← MCP server: 4 HR tools over stdio
+├── hr-db.ts              ← SQLite persistence
+└── cli.ts                ← inspect / reset the HR database
 
 tests/                    ← unit + integration tests (vitest, no API key needed)
 ```
+
+> The split is intentional: `hr-server/` is a self-contained MCP server that
+> knows nothing about Steve or any LLM — it could live in its own repo. `src/mcp/`
+> is the thin client the agent uses to talk to it. That's the whole lesson:
+> "adding MCP" means wiring a small client into an agent you already have.
 
 ## How the agent loop works
 
@@ -118,7 +125,7 @@ rewrite, no hardcoded HR functions.
 ```
 ┌─────────────────────────┐        stdio (JSON-RPC)        ┌──────────────────────────┐
 │  Steve (MCP client)      │  ───────────────────────────▶ │  HR server (MCP server)   │
-│  src/hr/hr-mcp-client.ts │                                │  src/hr/hr-server.ts      │
+│  src/mcp/hr-mcp-client.ts│                                │  hr-server/hr-server.ts   │
 │                          │  listTools()  →  4 tools       │   • get_employee_record   │
 │  wraps each MCP tool as  │  callTool()   →  text result   │   • file_complaint        │
 │  a normal agent Tool     │ ◀───────────────────────────  │   • nominate_for_promotion│
@@ -216,7 +223,7 @@ spawns the server command itself, so point it straight at our stdio entry:
 
 ```bash
 # Browser UI (default) — requires Node 22.19+
-npx @modelcontextprotocol/inspector npx tsx src/hr/hr-server.ts
+npx @modelcontextprotocol/inspector npx tsx hr-server/hr-server.ts
 ```
 
 It opens a browser UI where you can list the four tools, read their schemas, and
@@ -228,10 +235,10 @@ CLI:
 
 ```bash
 # Interactive terminal UI
-npx @modelcontextprotocol/inspector --tui npx tsx src/hr/hr-server.ts
+npx @modelcontextprotocol/inspector --tui npx tsx hr-server/hr-server.ts
 
 # One-shot: list the tools and exit (great for CI)
-npx @modelcontextprotocol/inspector --cli npx tsx src/hr/hr-server.ts --method tools/list
+npx @modelcontextprotocol/inspector --cli npx tsx hr-server/hr-server.ts --method tools/list
 ```
 
 The Inspector writes to its own database; it won't touch your `.hr-data/hr.db`

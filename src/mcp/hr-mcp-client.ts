@@ -29,16 +29,23 @@ function serverLaunchCommand(): { command: string; args: string[] } {
   // module's extension. When running via tsx (pnpm start) this file is .ts and
   // we launch the .ts server through tsx; when running compiled output it's
   // .js and we launch the .js server directly with node.
+  //
+  // The HR server lives in a sibling top-level folder (hr-server/). Relative to
+  // this file the path is the same in both layouts:
+  //   dev:      src/mcp/hr-mcp-client.ts  → ../../hr-server/hr-server.ts
+  //   compiled: dist/src/mcp/...js        → ../../hr-server/hr-server.js
   const isCompiled = import.meta.url.endsWith('.js');
+  const ext = isCompiled ? '.js' : '.ts';
+  const serverPath = resolve(here, '..', '..', 'hr-server', `hr-server${ext}`);
 
   if (isCompiled) {
-    return { command: process.execPath, args: [resolve(here, 'hr-server.js')] };
+    return { command: process.execPath, args: [serverPath] };
   }
 
   // Invoke tsx through node directly — cross-platform, and avoids the
   // "npx is not a valid Win32 application" class of spawn problems.
   const tsxCli = resolve(here, '..', '..', 'node_modules', 'tsx', 'dist', 'cli.mjs');
-  return { command: process.execPath, args: [tsxCli, resolve(here, 'hr-server.ts')] };
+  return { command: process.execPath, args: [tsxCli, serverPath] };
 }
 
 export interface HrMcpConnection {

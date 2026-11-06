@@ -5,7 +5,7 @@ import { buildReviewerSystemPrompt } from './prompts.js';
 import { getDiffTool } from './tools/get-diff.js';
 import { getFileTool } from './tools/get-file.js';
 import { listFilesTool } from './tools/list-files.js';
-import { connectHrMcp, type HrMcpConnection } from './hr/hr-mcp-client.js';
+import { connectHrMcp, type HrMcpConnection } from './mcp/hr-mcp-client.js';
 import { colors, printHeader, printReview } from './colors.js';
 import type { Tool } from './tools.js';
 

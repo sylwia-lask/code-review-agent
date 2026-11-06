@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { connectHrMcp, type HrMcpConnection } from '../src/hr/hr-mcp-client.js';
+import { connectHrMcp, type HrMcpConnection } from '../src/mcp/hr-mcp-client.js';
 
 /**
  * Real MCP client/server integration test.

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { HrDatabase, SEVERITIES } from '../src/hr/hr-db.js';
+import { HrDatabase, SEVERITIES } from '../hr-server/hr-db.js';
 
 /**
  * Tests for the SQLite persistence layer.

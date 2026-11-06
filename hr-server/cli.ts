@@ -1,5 +1,5 @@
 import { HrDatabase, resolveDbPath, type Complaint, type Promotion } from './hr-db.js';
-import { colors, printHeader } from '../colors.js';
+import { colors, printHeader } from '../src/colors.js';
 
 /**
  * Tiny CLI for inspecting and managing the (fictional) HR database directly,
@@ -103,7 +103,7 @@ function main(): void {
         resetRecords(db);
         break;
       default:
-        console.log('Usage: tsx src/hr/cli.ts <show|reset>');
+        console.log('Usage: tsx hr-server/cli.ts <show|reset>');
         console.log('  show   — print all HR records as tables');
         console.log('  reset  — wipe records and re-seed demo data');
         process.exitCode = 1;
