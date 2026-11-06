@@ -103,19 +103,20 @@ pnpm build      # compile TypeScript
 pnpm lint       # run ESLint
 pnpm format     # run Prettier
 
-# Steve's HR Department (MCP) — see the section below
+# HR Department (MCP) — see the section below
 pnpm hr:show    # print stored HR records as tables
 pnpm hr:reset   # wipe + re-seed fictional demo data
 pnpm hr:server  # run the HR MCP server standalone (for MCP Inspector)
 ```
 
-## Steve's HR Department (MCP)
+## HR Department (MCP)
 
-An optional, entirely fictional "HR department" built as a local **Model Context
-Protocol (MCP)** server. It shows how little it takes to add MCP to an existing
-agent: the server exposes tools, and Steve's agent loop picks them up through
-the *same* `Tool` interface it already uses for `getDiff`/`getFile`. No agent
-rewrite, no hardcoded HR functions.
+The story: Steve is required to report to HR — log complaints about bad code,
+nominate people for good work. So he wired up a small, local **Model Context
+Protocol (MCP)** server to do it. It shows how little it takes to add MCP to an
+existing agent: the server exposes tools, and Steve's agent loop picks them up
+through the *same* `Tool` interface it already uses for `getDiff`/`getFile`.
+No agent rewrite, no hardcoded HR functions.
 
 > All HR records are made-up jokes for a demo. They are not real employment
 > judgments. Steve roasts code, not people.

@@ -76,8 +76,9 @@ export async function connectHrMcp(dbPath?: string): Promise<HrMcpConnection> {
       ...stringEnv(process.env),
       ...(dbPath ? { HR_DB_PATH: dbPath } : {}),
     },
-    // Forward the server's stderr (its banner + logs) to ours so the user sees
-    // "HR server running". stdout stays reserved for the JSON-RPC protocol.
+    // Forward the server's stderr to ours so any real errors surface. The
+    // server runs quietly, so normally there's nothing here. stdout stays
+    // reserved for the JSON-RPC protocol.
     stderr: 'inherit',
   });
 

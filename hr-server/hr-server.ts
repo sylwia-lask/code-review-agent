@@ -4,7 +4,7 @@ import * as z from 'zod/v4';
 import { HrDatabase, SEVERITIES, type EmployeeRecord, type HrStats } from './hr-db.js';
 
 /**
- * Steve's HR Department — a local MCP server.
+ * HR Department — a local MCP server.
  *
  * This process is launched by the agent as a child over stdio. It exposes four
  * tools backed by SQLite. There is deliberately NO AI / LLM code in here — the
@@ -16,7 +16,7 @@ import { HrDatabase, SEVERITIES, type EmployeeRecord, type HrStats } from './hr-
  */
 export function createHrServer(db: HrDatabase): McpServer {
   const server = new McpServer({
-    name: 'steve-hr-department',
+    name: 'hr-department',
     version: '1.0.0',
   });
 
@@ -187,7 +187,7 @@ function formatRecord(record: EmployeeRecord): string {
 function formatStats(stats: HrStats): string {
   const sev = stats.complaintsBySeverity;
   return [
-    'Steve HR Department — Statistics',
+    'HR Department — Statistics',
     `  Total complaints:   ${stats.totalComplaints}`,
     `  Total promotions:   ${stats.totalPromotions}`,
     `  Developers tracked: ${stats.developersTracked}`,
@@ -202,8 +202,8 @@ function formatStats(stats: HrStats): string {
  * StdioClientTransport, or by MCP Inspector), start the server over stdio.
  *
  * We open the database inside the serveStdio factory so each server instance
- * owns its own connection, and we write only to stderr for logs (stdout is
- * reserved for the JSON-RPC protocol).
+ * owns its own connection. The server runs silently — stdout is reserved for
+ * the JSON-RPC protocol and we keep stderr quiet so it stays a background tool.
  */
 function isMainModule(): boolean {
   if (!process.argv[1]) return false;
@@ -214,8 +214,9 @@ function isMainModule(): boolean {
 
 if (isMainModule()) {
   serveStdio(() => {
+    // Run quietly — this server is a tool Steve calls, not the main character.
+    // stdout is reserved for the JSON-RPC protocol; we don't print a banner.
     const db = new HrDatabase();
-    console.error('🧑‍💼 Steve HR Department MCP server running on stdio');
     return createHrServer(db);
   });
 }

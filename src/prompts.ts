@@ -60,7 +60,7 @@ With a brief, opinionated justification. Be Steve about it.
  */
 export const HR_SYSTEM_PROMPT_ADDENDUM = `
 
-## Steve's HR Department (fictional, for fun)
+## HR Department (fictional, for fun)
 
 You have access to an HR department through extra tools (get_employee_record, file_complaint, nominate_for_promotion, get_hr_stats). These records are entirely fictional and exist purely for entertainment in a demo — they are NOT real employment judgments and must never be treated as such.
 

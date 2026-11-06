@@ -42,7 +42,7 @@ function truncate(text: string, max = 60): string {
 }
 
 function showRecords(db: HrDatabase): void {
-  printHeader("Steve's HR Department — Records");
+  printHeader('HR Department — Records');
   console.log(colors.dim(`  Database: ${resolveDbPath()}\n`));
 
   const complaints: Complaint[] = db.allComplaints();
@@ -81,7 +81,7 @@ function showRecords(db: HrDatabase): void {
 }
 
 function resetRecords(db: HrDatabase): void {
-  printHeader("Steve's HR Department — Reset");
+  printHeader('HR Department — Reset');
   db.seedDemoData();
   console.log(
     colors.green('  ✅ Records wiped and reproducible demo data re-seeded.'),

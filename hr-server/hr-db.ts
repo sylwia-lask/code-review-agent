@@ -3,7 +3,7 @@ import { mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
 
 /**
- * SQLite persistence for Steve's (entirely fictional) HR Department.
+ * SQLite persistence for the (entirely fictional) HR Department.
  *
  * This module contains NO AI and NO MCP — it's a plain data layer.
  * The MCP server (hr-server.ts) sits on top of it and exposes tools;
