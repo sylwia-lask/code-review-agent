@@ -3,21 +3,11 @@ import { mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
 
 /**
- * SQLite persistence for the (entirely fictional) HR Department.
- *
- * This module contains NO AI and NO MCP — it's a plain data layer.
- * The MCP server (hr-server.ts) sits on top of it and exposes tools;
- * the CLI (cli.ts) reads from it to print tables.
- *
- * Design notes for the article:
- * - Tables are created automatically on first open (CREATE TABLE IF NOT EXISTS).
- * - Every write uses parameterized SQL (never string interpolation) to avoid
- *   SQL injection, even though the "attacker" here is a sarcastic LLM.
- * - The database file lives in a local, gitignored directory so demo data
- *   never gets committed.
+ * SQLite persistence for the (entirely fictional) HR Department. A plain data
+ * layer with NO AI and NO MCP — the server sits on top of it. Tables are
+ * created on first open; every write uses parameterized SQL.
  */
 
-/** Valid complaint severities, from mild side-eye to full HR escalation. */
 export const SEVERITIES = ['minor', 'moderate', 'severe', 'legendary'] as const;
 export type Severity = (typeof SEVERITIES)[number];
 
@@ -51,13 +41,7 @@ export interface HrStats {
   complaintsBySeverity: Record<Severity, number>;
 }
 
-/**
- * Resolve the database file path.
- *
- * Priority:
- * 1. HR_DB_PATH env var (used by tests to point at a temp file)
- * 2. Default: <repo>/.hr-data/hr.db  (gitignored)
- */
+/** HR_DB_PATH env var if set (tests point it at a temp file), else .hr-data/hr.db. */
 export function resolveDbPath(): string {
   const fromEnv = process.env.HR_DB_PATH;
   if (fromEnv && fromEnv.trim()) {
@@ -66,13 +50,7 @@ export function resolveDbPath(): string {
   return resolve(process.cwd(), '.hr-data', 'hr.db');
 }
 
-/**
- * A thin wrapper around the SQLite database.
- *
- * Open it, use the methods, and call close() when done. Each instance owns
- * one better-sqlite3 connection (synchronous — no async/await needed, which
- * keeps the educational code easy to follow).
- */
+/** Owns one synchronous better-sqlite3 connection. Call close() when done. */
 export class HrDatabase {
   private db: Database.Database;
 
@@ -110,7 +88,6 @@ export class HrDatabase {
     `);
   }
 
-  /** Return all complaints and promotions for one developer. */
   getEmployeeRecord(developer: string): EmployeeRecord {
     const name = normalizeName(developer);
 
@@ -133,7 +110,6 @@ export class HrDatabase {
     return { developer: name, complaints, promotions };
   }
 
-  /** Store a complaint. Returns the created row. */
   fileComplaint(developer: string, reason: string, severity: Severity): Complaint {
     const name = normalizeName(developer);
     const info = this.db
@@ -149,7 +125,6 @@ export class HrDatabase {
       .get(info.lastInsertRowid) as Complaint;
   }
 
-  /** Record a promotion nomination. Returns the created row. */
   nominateForPromotion(developer: string, reason: string): Promotion {
     const name = normalizeName(developer);
     const info = this.db
@@ -163,7 +138,6 @@ export class HrDatabase {
       .get(info.lastInsertRowid) as Promotion;
   }
 
-  /** Aggregate department statistics. */
   getStats(): HrStats {
     const totalComplaints = (
       this.db.prepare(`SELECT COUNT(*) AS c FROM complaints`).get() as {
@@ -232,7 +206,6 @@ export class HrDatabase {
     };
   }
 
-  /** Every complaint, newest first (used by the CLI table view). */
   allComplaints(): Complaint[] {
     return this.db
       .prepare(
@@ -241,7 +214,6 @@ export class HrDatabase {
       .all() as Complaint[];
   }
 
-  /** Every promotion, newest first (used by the CLI table view). */
   allPromotions(): Promotion[] {
     return this.db
       .prepare(
@@ -302,7 +274,6 @@ export class HrDatabase {
     seed();
   }
 
-  /** Close the underlying connection. Always call this when done. */
   close(): void {
     this.db.close();
   }

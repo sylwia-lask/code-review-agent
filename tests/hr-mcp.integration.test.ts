@@ -5,14 +5,10 @@ import { join } from 'path';
 import { connectHrMcp, type HrMcpConnection } from '../src/mcp/hr-mcp-client.js';
 
 /**
- * Real MCP client/server integration test.
- *
- * This does NOT mock anything: connectHrMcp() spawns the actual HR server as a
- * child process over stdio, runs the MCP initialize handshake, discovers tools
- * with listTools(), and invokes them with callTool(). It proves the full round
- * trip works — the same path the agent uses at runtime.
- *
- * Spawning + handshake takes a moment, so we use a generous timeout.
+ * Real MCP client/server integration test — no mocks. connectHrMcp() spawns the
+ * actual server over stdio, does the handshake, lists tools, and calls them:
+ * the same path the agent uses at runtime. Spawning takes a moment, hence the
+ * generous timeout.
  */
 describe('HR MCP client/server integration', () => {
   let dir: string;
@@ -98,7 +94,6 @@ describe('HR MCP client/server integration', () => {
     expect(result.toLowerCase()).toContain('error');
   });
 
-  // --- helper ---
   function tool(name: string) {
     const found = hr.tools.find((t) => t.name === name);
     if (!found) throw new Error(`tool ${name} not found`);

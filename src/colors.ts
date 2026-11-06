@@ -27,12 +27,7 @@ export function printHeader(text: string): void {
   console.log(colors.cyan(line));
 }
 
-/**
- * Print a step indicator for tool calls.
- *
- * HR tools (from the MCP server) are highlighted so every HR action is clearly
- * visible in the CLI output, separate from ordinary code-reading tools.
- */
+/** Print a step indicator for a tool call; HR tool calls are highlighted. */
 export function printStep(
   step: number,
   toolName: string,
@@ -57,9 +52,6 @@ export function printStep(
   );
 }
 
-/**
- * Print the result of an HR action so it's unmistakable in the output.
- */
 export function printHrResult(result: string): void {
   console.log(colors.cyan('    ↳ ') + colors.dim(result.replace(/\n/g, '\n      ')));
 }

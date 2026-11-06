@@ -2,14 +2,8 @@ import { HrDatabase, resolveDbPath, type Complaint, type Promotion } from './hr-
 import { colors, printHeader } from '../src/colors.js';
 
 /**
- * Tiny CLI for inspecting and managing the (fictional) HR database directly,
- * without going through the MCP server or the LLM.
- *
- *   pnpm hr:show   → print all complaints and promotions as readable tables
- *   pnpm hr:reset  → wipe records and re-seed reproducible demo data
- *
- * Useful for the article: it proves the SQLite data is real and inspectable,
- * and gives readers a one-command way to reset the demo.
+ * CLI to inspect and manage the HR database directly, without the MCP server or
+ * the LLM: `pnpm hr:show` prints tables, `pnpm hr:reset` re-seeds demo data.
  */
 
 function printTable(headers: string[], rows: string[][]): void {
@@ -18,7 +12,6 @@ function printTable(headers: string[], rows: string[][]): void {
     return;
   }
 
-  // Compute column widths from headers + cells.
   const widths = headers.map((h, i) =>
     Math.max(h.length, ...rows.map((r) => (r[i] ?? '').length)),
   );

@@ -52,11 +52,8 @@ With a brief, opinionated justification. Be Steve about it.
 `;
 
 /**
- * Extra instructions appended when the HR MCP server is connected.
- *
- * Kept separate so the base reviewer prompt is unchanged when MCP is disabled —
- * Steve behaves exactly as before. The LLM, not our code, decides whether any
- * HR action is warranted.
+ * Appended only when the HR MCP server is connected, so the base reviewer
+ * prompt is unchanged with MCP off. The LLM decides whether an HR action fits.
  */
 export const HR_SYSTEM_PROMPT_ADDENDUM = `
 
@@ -74,12 +71,6 @@ Use them tastefully as part of your persona:
 When you reference HR history or take an HR action, weave a short, funny remark into your commentary so the user sees what you did and why.
 `;
 
-/**
- * Build the final system prompt.
- *
- * @param options.hrEnabled  Append the HR addendum when the MCP server is on.
- * @param options.prAuthor   Optional PR author name to make available to Steve.
- */
 export function buildReviewerSystemPrompt(options: {
   hrEnabled: boolean;
   prAuthor?: string;

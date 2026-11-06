@@ -20,7 +20,6 @@ export function createHrServer(db: HrDatabase): McpServer {
     version: '1.0.0',
   });
 
-  // --- get_employee_record ------------------------------------------------
   server.registerTool(
     'get_employee_record',
     {
@@ -45,7 +44,6 @@ export function createHrServer(db: HrDatabase): McpServer {
     },
   );
 
-  // --- file_complaint -----------------------------------------------------
   server.registerTool(
     'file_complaint',
     {
@@ -92,7 +90,6 @@ export function createHrServer(db: HrDatabase): McpServer {
     },
   );
 
-  // --- nominate_for_promotion ---------------------------------------------
   server.registerTool(
     'nominate_for_promotion',
     {
@@ -132,7 +129,6 @@ export function createHrServer(db: HrDatabase): McpServer {
     },
   );
 
-  // --- get_hr_stats -------------------------------------------------------
   server.registerTool(
     'get_hr_stats',
     {
@@ -153,7 +149,6 @@ export function createHrServer(db: HrDatabase): McpServer {
   return server;
 }
 
-/** Human-readable (and model-readable) rendering of an employee record. */
 function formatRecord(record: EmployeeRecord): string {
   const lines: string[] = [`HR file for ${record.developer}:`];
 
@@ -183,7 +178,6 @@ function formatRecord(record: EmployeeRecord): string {
   return lines.join('\n');
 }
 
-/** Human-readable rendering of department stats. */
 function formatStats(stats: HrStats): string {
   const sev = stats.complaintsBySeverity;
   return [
@@ -214,8 +208,6 @@ function isMainModule(): boolean {
 
 if (isMainModule()) {
   serveStdio(() => {
-    // Run quietly — this server is a tool Steve calls, not the main character.
-    // stdout is reserved for the JSON-RPC protocol; we don't print a banner.
     const db = new HrDatabase();
     return createHrServer(db);
   });
