@@ -30,7 +30,15 @@ function serverLaunchCommand(): { command: string; args: string[] } {
 
   // Invoke tsx through node directly — cross-platform, and avoids the
   // "npx is not a valid Win32 application" class of spawn problems.
-  const tsxCli = resolve(here, '..', '..', 'node_modules', 'tsx', 'dist', 'cli.mjs');
+  const tsxCli = resolve(
+    here,
+    '..',
+    '..',
+    'node_modules',
+    'tsx',
+    'dist',
+    'cli.mjs',
+  );
   return { command: process.execPath, args: [tsxCli, serverPath] };
 }
 
@@ -40,14 +48,28 @@ export interface HrMcpConnection {
   close: () => Promise<void>;
 }
 
+export interface ConnectHrMcpOptions {
+  /**
+   * Optional HEAD commit SHA observed in the local repository. When set,
+   * client-side calls to `file_complaint` verify that the LLM's `commit_sha`
+   * matches (or is a 7..40 hex prefix of) the real local HEAD commit before
+   * forwarding the call to the MCP server.
+   */
+  expectedCommitSha?: string;
+}
+
 /**
  * Connect to the HR MCP server and return its tools, already mapped into the
  * agent's `Tool` interface, plus a close() handle.
  *
  * @param dbPath Optional SQLite path forwarded to the child via HR_DB_PATH
  *               (tests use it to point at a temp database).
+ * @param options Optional client-side harness safeguards (such as `expectedCommitSha`).
  */
-export async function connectHrMcp(dbPath?: string): Promise<HrMcpConnection> {
+export async function connectHrMcp(
+  dbPath?: string,
+  options?: ConnectHrMcpOptions,
+): Promise<HrMcpConnection> {
   const client = new Client({ name: 'steve-code-reviewer', version: '1.0.0' });
 
   const { command, args } = serverLaunchCommand();
@@ -66,12 +88,33 @@ export async function connectHrMcp(dbPath?: string): Promise<HrMcpConnection> {
 
   const { tools: mcpTools } = await client.listTools();
 
+  const expectedSha =
+    options?.expectedCommitSha &&
+    /^[0-9a-f]{7,40}$/i.test(options.expectedCommitSha.trim())
+      ? options.expectedCommitSha.trim().toLowerCase()
+      : undefined;
+
   const tools: Tool[] = mcpTools.map((mcpTool) => ({
     name: mcpTool.name,
     description: mcpTool.description ?? '',
     parameters: mcpInputSchemaToGemini(mcpTool.inputSchema),
     isHrAction: true,
     execute: async (toolArgs: Record<string, unknown>) => {
+      if (mcpTool.name === 'file_complaint' && expectedSha) {
+        const provided =
+          typeof toolArgs.commit_sha === 'string'
+            ? toolArgs.commit_sha.trim().toLowerCase()
+            : '';
+        if (
+          /^[0-9a-f]{7,40}$/.test(provided) &&
+          !(
+            expectedSha.startsWith(provided) || provided.startsWith(expectedSha)
+          )
+        ) {
+          return `Error: commit_sha "${provided}" does not match current HEAD commit "${expectedSha}". Use the exact HEAD Commit SHA reported by getDiff.`;
+        }
+      }
+
       const result = await client.callTool({
         name: mcpTool.name,
         arguments: toolArgs,

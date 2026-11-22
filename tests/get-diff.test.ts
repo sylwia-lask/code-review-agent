@@ -88,14 +88,27 @@ describe('getDiffTool', () => {
     expect(result).toContain('... [diff truncated at 10,000 characters]');
   });
 
-  it('handles an initialized git repository with no commits (unborn HEAD) without throwing', async () => {
+  it('handles an initialized git repository with no commits (unborn HEAD) and includes staged changes', async () => {
     execSync('git init', { cwd: tempDir, stdio: 'pipe' });
 
-    const result = await getDiffTool.execute({});
-
-    expect(result).toContain(
+    const cleanResult = await getDiffTool.execute({});
+    expect(cleanResult).toContain(
       'HEAD Commit SHA: (none — unborn HEAD, create an initial commit before filing HR complaints)',
     );
+    expect(cleanResult).toContain('Working Tree: clean');
+
+    writeFileSync(
+      join(tempDir, 'staged.ts'),
+      'export const staged = true;\n',
+      'utf-8',
+    );
+    execSync('git add staged.ts', { cwd: tempDir, stdio: 'pipe' });
+
+    const stagedResult = await getDiffTool.execute({});
+    expect(stagedResult).toContain(
+      'HEAD Commit SHA: (none — unborn HEAD, create an initial commit before filing HR complaints)',
+    );
+    expect(stagedResult).toContain('+export const staged = true;');
   });
 
   it('returns a clear error message when executed outside a git repository', async () => {

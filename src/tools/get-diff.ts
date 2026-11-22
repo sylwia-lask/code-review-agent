@@ -23,11 +23,11 @@ export const getDiffTool: Tool = {
   execute: async () => {
     try {
       let headSha: string;
-      let diff: string;
+      let hasHead = false;
 
       try {
         headSha = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim();
-        diff = execSync('git diff HEAD', { encoding: 'utf-8' });
+        hasHead = true;
       } catch (revParseErr) {
         const message =
           revParseErr instanceof Error
@@ -39,8 +39,16 @@ export const getDiffTool: Tool = {
         // Repository is initialized but has no commits yet (unborn HEAD)
         headSha =
           '(none — unborn HEAD, create an initial commit before filing HR complaints)';
-        diff = execSync('git diff', { encoding: 'utf-8' });
       }
+
+      const diff = hasHead
+        ? execSync('git diff HEAD', { encoding: 'utf-8' })
+        : [
+            execSync('git diff --cached', { encoding: 'utf-8' }),
+            execSync('git diff', { encoding: 'utf-8' }),
+          ]
+            .filter((part) => part.trim().length > 0)
+            .join('\n');
 
       if (!diff.trim()) {
         return (

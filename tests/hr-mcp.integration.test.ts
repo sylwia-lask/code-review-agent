@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { COMPLAINT_CATEGORIES } from '../hr-server/hr-db.js';
 import {
   connectHrMcp,
   type HrMcpConnection,
@@ -48,6 +49,10 @@ describe('HR MCP client/server integration', () => {
     expect(complaint?.parameters?.properties?.developer).toBeDefined();
     expect(complaint?.parameters?.properties?.commit_sha).toBeDefined();
     expect(complaint?.parameters?.properties?.category).toBeDefined();
+    expect(complaint?.parameters?.properties?.category?.enum).toEqual([
+      ...COMPLAINT_CATEGORIES,
+    ]);
+    expect(complaint?.parameters?.properties?.severity).toBeUndefined();
     expect(complaint?.parameters?.properties?.reason).toBeDefined();
   });
 
@@ -87,6 +92,18 @@ describe('HR MCP client/server integration', () => {
     expect(retryResult).toContain('Idempotent match');
     expect(retryResult).toContain('complaint #1');
     expect(retryResult).toContain('weight=8');
+
+    // Also matches when re-run supplies the full 40-char SHA for the same 7-char prefix
+    const fullShaRetry = await fileComplaint.execute({
+      developer: 'Sylwia',
+      commit_sha: '0c1905850fde9d97bfbe9416097081d11f193626',
+      category: 'reckless_practice',
+      reason: 'Re-run with full 40-char SHA',
+    });
+    expect(fullShaRetry.startsWith('Error:')).toBe(false);
+    expect(fullShaRetry).toContain('Idempotent match');
+    expect(fullShaRetry).toContain('complaint #1');
+    expect(fullShaRetry).toContain('on 0c19058');
 
     const stats = await tool('get_hr_stats').execute({});
     expect(stats).toContain('Total complaints:      1 (total weight: 8)');
@@ -132,6 +149,48 @@ describe('HR MCP client/server integration', () => {
       reason: 'Swallowed an exception in catch block',
     });
     expect(tooShort.toLowerCase()).toContain('error');
+
+    const tooLong = await tool('file_complaint').execute({
+      developer: 'Casey Nullpointer',
+      commit_sha: 'a'.repeat(41), // more than 40 hex chars
+      category: 'error_handling',
+      reason: 'Swallowed an exception in catch block',
+    });
+    expect(tooLong.toLowerCase()).toContain('error');
+  });
+
+  it('rejects a hallucinated commit_sha at the client harness when expectedCommitSha is configured', async () => {
+    const guarded = await connectHrMcp(dbPath, {
+      expectedCommitSha: '0c1905850fde9d97bfbe9416097081d11f193626',
+    });
+    try {
+      const guardedFile = guarded.tools.find(
+        (t) => t.name === 'file_complaint',
+      )!;
+
+      // Mismatched valid hex SHA is blocked before reaching the MCP server
+      const mismatch = await guardedFile.execute({
+        developer: 'Sylwia',
+        commit_sha: 'deadbeef',
+        category: 'missing_tests',
+        reason: 'Missing tests on new endpoint',
+      });
+      expect(mismatch).toContain(
+        'Error: commit_sha "deadbeef" does not match current HEAD commit "0c1905850fde9d97bfbe9416097081d11f193626"',
+      );
+
+      // Matching 7-char prefix of expectedCommitSha is allowed through
+      const allowedPrefix = await guardedFile.execute({
+        developer: 'Sylwia',
+        commit_sha: '0c19058',
+        category: 'missing_tests',
+        reason: 'Missing tests on new endpoint',
+      });
+      expect(allowedPrefix.startsWith('Error:')).toBe(false);
+      expect(allowedPrefix).toContain('Complaint #2');
+    } finally {
+      await guarded.close();
+    }
   });
 
   it('returns a validation error for a too-short reason', async () => {

@@ -134,6 +134,88 @@ describe('HrDatabase (SQLite persistence)', () => {
     expect(stats.developersTracked).toBe(1);
   });
 
+  it('deduplicates bidirectionally between 7-char short SHA and 40-char full SHA, promoting stored SHA to full length', () => {
+    // 1. Short SHA first -> Full SHA second (promotes stored commit_sha to 40 chars)
+    const shortFirst = db.fileComplaint(
+      'Sylwia',
+      '0c19058',
+      'security_vulnerability',
+      'Short SHA filed first',
+    );
+    expect(shortFirst.created).toBe(true);
+    expect(shortFirst.complaint.commit_sha).toBe('0c19058');
+
+    const fullSecond = db.fileComplaint(
+      'sylwia',
+      '0c1905850fde9d97bfbe9416097081d11f193626',
+      'security_vulnerability',
+      'Full 40-char SHA filed on subsequent run',
+    );
+    expect(fullSecond.created).toBe(false);
+    expect(fullSecond.complaint.id).toBe(shortFirst.complaint.id);
+    expect(fullSecond.complaint.commit_sha).toBe(
+      '0c1905850fde9d97bfbe9416097081d11f193626',
+    );
+
+    // 2. Full SHA first -> Short SHA second (keeps stored 40-char commit_sha)
+    const fullFirst = db.fileComplaint(
+      'Dusty McLegacy',
+      'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+      'reckless_practice',
+      'Full 40-char SHA filed first',
+    );
+    expect(fullFirst.created).toBe(true);
+
+    const shortSecond = db.fileComplaint(
+      'Dusty McLegacy',
+      'a1b2c3d',
+      'reckless_practice',
+      'Short 7-char prefix filed on second run',
+    );
+    expect(shortSecond.created).toBe(false);
+    expect(shortSecond.complaint.id).toBe(fullFirst.complaint.id);
+    expect(shortSecond.complaint.commit_sha).toBe(
+      'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+    );
+
+    expect(db.getStats().totalComplaints).toBe(2);
+  });
+
+  it('enforces defensive input validation directly in HrDatabase methods', () => {
+    expect(() =>
+      db.fileComplaint('   ', '0c19058', 'error_handling', 'Valid reason text'),
+    ).toThrow(/developer name is required/i);
+
+    expect(() =>
+      db.fileComplaint(
+        'Dusty McLegacy',
+        'not-a-sha',
+        'error_handling',
+        'Valid reason text',
+      ),
+    ).toThrow(/7-40 character hex git SHA/i);
+
+    expect(() =>
+      db.fileComplaint(
+        'Dusty McLegacy',
+        '0c19058',
+        'apocalyptic' as unknown as (typeof COMPLAINT_CATEGORIES)[number],
+        'Valid reason text',
+      ),
+    ).toThrow(/invalid complaint category/i);
+
+    expect(() =>
+      db.fileComplaint('Dusty McLegacy', '0c19058', 'error_handling', 'tiny'),
+    ).toThrow(/reason must be between 5 and 500 characters/i);
+
+    expect(() => db.nominateForPromotion('', 'Valid reason text')).toThrow(
+      /developer name is required/i,
+    );
+    expect(() => db.nominateForPromotion('Ada Refactor', 'bad')).toThrow(
+      /reason must be between 5 and 500 characters/i,
+    );
+  });
+
   it('allows distinct categories on the same commit_sha and sums their weights', () => {
     const sec = db.fileComplaint(
       'Sylwia',
@@ -249,19 +331,21 @@ describe('HrDatabase (SQLite persistence)', () => {
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
       INSERT INTO complaints (developer, reason, severity) VALUES
-        ('Dusty McLegacy', 'Friday mega-push', 'legendary'),
+        ('  Dusty   McLegacy  ', 'Friday mega-push', ' LEGENDARY '),
         ('Casey Nullpointer', 'Swallowed error', 'severe'),
         ('Dusty McLegacy', 'Bad variable names', 'moderate'),
-        ('Casey Nullpointer', 'Minor naming hazard', 'minor');
+        ('Casey Nullpointer', 'Minor naming hazard', 'minor'),
+        ('Casey Nullpointer', 'Mystery outage', 'catastrophic');
     `);
     raw.close();
 
     const migrated = new HrDatabase(legacyPath);
     try {
       const all = migrated.allComplaints();
-      expect(all).toHaveLength(4);
+      expect(all).toHaveLength(5);
 
       const byId = new Map(all.map((c) => [c.id, c]));
+      expect(byId.get(1)?.developer).toBe('Dusty McLegacy');
       expect(byId.get(1)?.commit_sha).toBe('legacy-000001');
       expect(byId.get(1)?.category).toBe('reckless_practice');
       expect(byId.get(1)?.weight).toBe(8);
@@ -277,6 +361,10 @@ describe('HrDatabase (SQLite persistence)', () => {
       expect(byId.get(4)?.commit_sha).toBe('legacy-000004');
       expect(byId.get(4)?.category).toBe('maintainability');
       expect(byId.get(4)?.weight).toBe(2);
+
+      expect(byId.get(5)?.commit_sha).toBe('legacy-000005');
+      expect(byId.get(5)?.category).toBe('bug_or_regression');
+      expect(byId.get(5)?.weight).toBe(5);
 
       // Verify idempotency constraint works on the migrated table.
       const firstNew = migrated.fileComplaint(

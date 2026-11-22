@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { execSync } from 'child_process';
 import { GeminiProvider } from './gemini-provider.js';
 import { runAgent } from './agent.js';
 import { buildReviewerSystemPrompt } from './prompts.js';
@@ -39,7 +40,19 @@ async function main() {
 
   if (hrEnabled) {
     try {
-      hr = await connectHrMcp();
+      let currentHeadSha: string | undefined;
+      try {
+        currentHeadSha = execSync('git rev-parse HEAD', {
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim();
+      } catch {
+        currentHeadSha = undefined;
+      }
+
+      hr = await connectHrMcp(undefined, {
+        expectedCommitSha: currentHeadSha,
+      });
       tools = [...baseTools, ...hr.tools];
       console.log(
         colors.cyan(

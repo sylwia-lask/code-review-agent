@@ -133,6 +133,18 @@ export class HrDatabase {
           );
         `);
       } else if (!hasV1Columns) {
+        const legacyRows = this.db
+          .prepare(
+            `SELECT id, developer, reason, severity, created_at FROM complaints ORDER BY id ASC`,
+          )
+          .all() as {
+          id: number;
+          developer: string;
+          reason: string;
+          severity: string | null;
+          created_at: string;
+        }[];
+
         this.db.exec(`
           CREATE TABLE complaints_v1 (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,7 +165,9 @@ export class HrDatabase {
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(developer, commit_sha, category)
           );
+        `);
 
+        const insertLegacy = this.db.prepare(`
           INSERT INTO complaints_v1 (
             id,
             developer,
@@ -162,29 +176,40 @@ export class HrDatabase {
             weight,
             reason,
             created_at
-          )
-          SELECT
-            id,
-            TRIM(developer),
-            'legacy-' || printf('%06d', id),
-            CASE severity
-              WHEN 'legendary' THEN 'reckless_practice'
-              WHEN 'severe'    THEN 'error_handling'
-              WHEN 'moderate'  THEN 'maintainability'
-              WHEN 'minor'     THEN 'maintainability'
-              ELSE 'bug_or_regression'
-            END,
-            CASE severity
-              WHEN 'legendary' THEN 8
-              WHEN 'severe'    THEN 6
-              WHEN 'moderate'  THEN 2
-              WHEN 'minor'     THEN 2
-              ELSE 5
-            END,
-            reason,
-            created_at
-          FROM complaints;
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
 
+        for (const row of legacyRows) {
+          const normalizedDev = normalizeName(row.developer) || 'Unknown';
+          const legacySha = `legacy-${String(row.id).padStart(6, '0')}`;
+          const sev = String(row.severity ?? '')
+            .trim()
+            .toLowerCase();
+          let category: ComplaintCategory;
+          if (sev === 'legendary') {
+            category = 'reckless_practice';
+          } else if (sev === 'severe') {
+            category = 'error_handling';
+          } else if (sev === 'moderate' || sev === 'minor') {
+            category = 'maintainability';
+          } else {
+            category = 'bug_or_regression';
+          }
+          const weight = CATEGORY_WEIGHTS[category];
+          const cleanReason = (row.reason ?? '').trim() || '(legacy complaint)';
+
+          insertLegacy.run(
+            row.id,
+            normalizedDev,
+            legacySha,
+            category,
+            weight,
+            cleanReason,
+            row.created_at,
+          );
+        }
+
+        this.db.exec(`
           DROP TABLE complaints;
           ALTER TABLE complaints_v1 RENAME TO complaints;
         `);
@@ -241,11 +266,59 @@ export class HrDatabase {
     reason: string,
   ): FileComplaintResult {
     const name = normalizeName(developer);
+    if (!name || name.length > 100) {
+      throw new Error('developer name is required (1-100 characters)');
+    }
+
     const sha = normalizeCommitSha(commitSha);
+    if (!/^[0-9a-f]{7,40}$/.test(sha)) {
+      throw new Error('commit_sha must be a 7-40 character hex git SHA');
+    }
+
+    const weight = CATEGORY_WEIGHTS[category];
+    if (typeof weight !== 'number') {
+      throw new Error(`invalid complaint category: ${String(category)}`);
+    }
+
     const cleanReason = reason.trim();
-    const weight = CATEGORY_WEIGHTS[category] ?? 0;
+    if (cleanReason.length < 5 || cleanReason.length > 500) {
+      throw new Error('reason must be between 5 and 500 characters');
+    }
 
     const tx = this.db.transaction((): FileComplaintResult => {
+      const existing = this.db
+        .prepare(
+          `SELECT id, developer, commit_sha, category, weight, reason, created_at
+           FROM complaints
+           WHERE developer = ? COLLATE NOCASE
+             AND category = ?
+             AND (
+               commit_sha = ?
+               OR (
+                 commit_sha NOT GLOB 'legacy-*'
+                 AND (
+                   (length(commit_sha) < length(?) AND substr(?, 1, length(commit_sha)) = commit_sha)
+                   OR
+                   (length(?) < length(commit_sha) AND substr(commit_sha, 1, length(?)) = ?)
+                 )
+               )
+             )
+           ORDER BY id ASC
+           LIMIT 1`,
+        )
+        .get(name, category, sha, sha, sha, sha, sha, sha) as
+        Complaint | undefined;
+
+      if (existing) {
+        if (sha.length > existing.commit_sha.length) {
+          this.db
+            .prepare(`UPDATE complaints SET commit_sha = ? WHERE id = ?`)
+            .run(sha, existing.id);
+          existing.commit_sha = sha;
+        }
+        return { complaint: existing, created: false };
+      }
+
       const info = this.db
         .prepare(
           `INSERT INTO complaints (developer, commit_sha, category, weight, reason)
@@ -264,7 +337,7 @@ export class HrDatabase {
         return { complaint, created: true };
       }
 
-      const existing = this.db
+      const fallbackExisting = this.db
         .prepare(
           `SELECT id, developer, commit_sha, category, weight, reason, created_at
            FROM complaints
@@ -272,7 +345,7 @@ export class HrDatabase {
         )
         .get(name, sha, category) as Complaint;
 
-      return { complaint: existing, created: false };
+      return { complaint: fallbackExisting, created: false };
     });
 
     return tx();
@@ -280,9 +353,17 @@ export class HrDatabase {
 
   nominateForPromotion(developer: string, reason: string): Promotion {
     const name = normalizeName(developer);
+    if (!name || name.length > 100) {
+      throw new Error('developer name is required (1-100 characters)');
+    }
+    const cleanReason = reason.trim();
+    if (cleanReason.length < 5 || cleanReason.length > 500) {
+      throw new Error('reason must be between 5 and 500 characters');
+    }
+
     const info = this.db
       .prepare(`INSERT INTO promotions (developer, reason) VALUES (?, ?)`)
-      .run(name, reason.trim());
+      .run(name, cleanReason);
 
     return this.db
       .prepare(
