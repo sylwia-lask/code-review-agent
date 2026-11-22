@@ -115,7 +115,7 @@ The story: Steve is required to report to HR — log complaints about bad code,
 nominate people for good work. So he wired up a small, local **Model Context
 Protocol (MCP)** server to do it. It shows how little it takes to add MCP to an
 existing agent: the server exposes tools, and Steve's agent loop picks them up
-through the *same* `Tool` interface it already uses for `getDiff`/`getFile`.
+through the _same_ `Tool` interface it already uses for `getDiff`/`getFile`.
 No agent rewrite, no hardcoded HR functions.
 
 > All HR records are made-up jokes for a demo. They are not real employment
@@ -142,17 +142,17 @@ No agent rewrite, no hardcoded HR functions.
   converted to Gemini's parameter format and dropped into the tool registry.
 - Every tool call is routed through `callTool()` and the text result is handed
   back to the LLM — exactly like a built-in tool.
-- The LLM decides *whether* an HR action is appropriate. The server only stores
+- The LLM decides _whether_ an HR action is appropriate. The server only stores
   and validates data (no AI lives in the server).
 
 ### The four tools
 
-| Tool | What it does |
-| --- | --- |
-| `get_employee_record(developer)` | Read a developer's complaints and promotions |
-| `file_complaint(developer, reason, severity)` | Store a complaint (`minor` → `legendary`) |
-| `nominate_for_promotion(developer, reason)` | Record a positive achievement |
-| `get_hr_stats()` | Department-wide statistics |
+| Tool                                                      | What it does                                                                                                                                        |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_employee_record(developer)`                          | Read a developer's complaints and promotions                                                                                                        |
+| `file_complaint(developer, commit_sha, category, reason)` | File an idempotent complaint categorized by offense type with a fixed server-assigned weight (deduplicated per `(developer, commit_sha, category)`) |
+| `nominate_for_promotion(developer, reason)`               | Record a positive achievement                                                                                                                       |
+| `get_hr_stats()`                                          | Department-wide statistics                                                                                                                          |
 
 ### Enable it
 
@@ -228,8 +228,9 @@ npx @modelcontextprotocol/inspector npx tsx hr-server/hr-server.ts
 ```
 
 It opens a browser UI where you can list the four tools, read their schemas, and
-call them by hand — for example `file_complaint` with an invalid `severity` to
-watch the validation error come back as an `isError` result.
+call them by hand — for example `file_complaint` with an invalid `category` or
+malformed `commit_sha` to watch the validation error come back as an `isError`
+result.
 
 Prefer the terminal or a scriptable check? The same package ships a TUI and a
 CLI:

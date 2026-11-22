@@ -1,4 +1,9 @@
-import { HrDatabase, resolveDbPath, type Complaint, type Promotion } from './hr-db.js';
+import {
+  HrDatabase,
+  resolveDbPath,
+  type Complaint,
+  type Promotion,
+} from './hr-db.js';
 import { colors, printHeader } from '../src/colors.js';
 
 /**
@@ -19,8 +24,7 @@ function printTable(headers: string[], rows: string[][]): void {
   const renderRow = (cells: string[]) =>
     '  ' + cells.map((c, i) => (c ?? '').padEnd(widths[i])).join('  │  ');
 
-  const separator =
-    '  ' + widths.map((w) => '─'.repeat(w)).join('──┼──');
+  const separator = '  ' + widths.map((w) => '─'.repeat(w)).join('──┼──');
 
   console.log(colors.bold(renderRow(headers)));
   console.log(colors.dim(separator));
@@ -42,15 +46,18 @@ function showRecords(db: HrDatabase): void {
   const promotions: Promotion[] = db.allPromotions();
 
   console.log(colors.bold(colors.yellow('\n📋 Complaints')));
+  const complaintRows = complaints.map((c) => [
+    String(c.id),
+    c.developer,
+    c.commit_sha.slice(0, 7),
+    c.category,
+    String(c.weight),
+    truncate(c.reason, 48),
+    c.created_at,
+  ]);
   printTable(
-    ['ID', 'Developer', 'Severity', 'Reason', 'When'],
-    complaints.map((c) => [
-      String(c.id),
-      c.developer,
-      c.severity,
-      truncate(c.reason),
-      c.created_at,
-    ]),
+    ['ID', 'Developer', 'Commit', 'Category', 'Wt', 'Reason', 'When'],
+    complaintRows,
   );
 
   console.log(colors.bold(colors.green('\n🏆 Promotions')));
@@ -67,10 +74,19 @@ function showRecords(db: HrDatabase): void {
   const stats = db.getStats();
   console.log(
     colors.dim(
-      `\n  ${stats.totalComplaints} complaints, ${stats.totalPromotions} promotions, ` +
-        `${stats.developersTracked} developers on file.`,
+      `\n  Total complaints: ${stats.totalComplaints} (weight: ${stats.totalWeight})  |  ` +
+        `Total promotions: ${stats.totalPromotions}  |  ` +
+        `Developers tracked: ${stats.developersTracked}`,
     ),
   );
+  if (stats.mostComplainedAbout) {
+    console.log(
+      colors.dim(
+        `  Most complained-about: ${stats.mostComplainedAbout.developer} ` +
+          `(${stats.mostComplainedAbout.count} complaints, weight: ${stats.mostComplainedAbout.totalWeight})`,
+      ),
+    );
+  }
 }
 
 function resetRecords(db: HrDatabase): void {
@@ -80,7 +96,9 @@ function resetRecords(db: HrDatabase): void {
     colors.green('  ✅ Records wiped and reproducible demo data re-seeded.'),
   );
   console.log(colors.dim(`  Database: ${resolveDbPath()}`));
-  console.log(colors.dim('  Run `pnpm hr:show` to see the fresh demo records.'));
+  console.log(
+    colors.dim('  Run `pnpm hr:show` to see the fresh demo records.'),
+  );
 }
 
 function main(): void {

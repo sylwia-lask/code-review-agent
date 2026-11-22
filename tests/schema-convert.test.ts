@@ -28,14 +28,22 @@ describe('mcpInputSchemaToGemini', () => {
     const result = mcpInputSchemaToGemini({
       type: 'object',
       properties: {
-        severity: { type: 'string', enum: ['minor', 'moderate', 'severe', 'legendary'] },
+        severity: {
+          type: 'string',
+          enum: ['minor', 'moderate', 'severe', 'legendary'],
+        },
       },
       required: ['severity'],
     });
 
     const severity = result?.properties?.severity;
     expect(severity?.type).toBe(Type.STRING);
-    expect(severity?.enum).toEqual(['minor', 'moderate', 'severe', 'legendary']);
+    expect(severity?.enum).toEqual([
+      'minor',
+      'moderate',
+      'severe',
+      'legendary',
+    ]);
   });
 
   it('represents a no-argument tool as an empty object schema', () => {
@@ -75,5 +83,49 @@ describe('mcpInputSchemaToGemini', () => {
   it('returns undefined for non-object input', () => {
     expect(mcpInputSchemaToGemini(undefined)).toBeUndefined();
     expect(mcpInputSchemaToGemini('nope')).toBeUndefined();
+  });
+
+  it('preserves complaint category enum and converts commit_sha with pattern to Gemini string schema', () => {
+    const categories = [
+      'security_vulnerability',
+      'reckless_practice',
+      'error_handling',
+      'bug_or_regression',
+      'missing_tests',
+      'maintainability',
+    ];
+
+    const result = mcpInputSchemaToGemini({
+      type: 'object',
+      properties: {
+        developer: { type: 'string', description: 'Developer name' },
+        commit_sha: {
+          type: 'string',
+          pattern: '^[0-9a-f]{7,40}$',
+          description: 'Git commit SHA (7-40 hex characters)',
+        },
+        category: {
+          type: 'string',
+          enum: categories,
+          description: 'Fixed technical complaint category',
+        },
+        reason: { type: 'string', description: 'Concrete offense description' },
+      },
+      required: ['developer', 'commit_sha', 'category', 'reason'],
+    });
+
+    expect(result?.type).toBe(Type.OBJECT);
+    expect(result?.properties?.category.type).toBe(Type.STRING);
+    expect(result?.properties?.category.enum).toEqual(categories);
+    expect(result?.properties?.commit_sha.type).toBe(Type.STRING);
+    expect(result?.properties?.commit_sha.description).toBe(
+      'Git commit SHA (7-40 hex characters)',
+    );
+    expect(result?.required).toEqual([
+      'developer',
+      'commit_sha',
+      'category',
+      'reason',
+    ]);
   });
 });

@@ -5,18 +5,41 @@ import { dirname, resolve } from 'path';
 /**
  * SQLite persistence for the (entirely fictional) HR Department. A plain data
  * layer with NO AI and NO MCP — the server sits on top of it. Tables are
- * created on first open; every write uses parameterized SQL.
+ * created/migrated on first open; every write uses parameterized SQL.
  */
 
-export const SEVERITIES = ['minor', 'moderate', 'severe', 'legendary'] as const;
-export type Severity = (typeof SEVERITIES)[number];
+export const COMPLAINT_CATEGORIES = [
+  'security_vulnerability',
+  'reckless_practice',
+  'error_handling',
+  'bug_or_regression',
+  'missing_tests',
+  'maintainability',
+] as const;
+export type ComplaintCategory = (typeof COMPLAINT_CATEGORIES)[number];
+
+export const CATEGORY_WEIGHTS: Record<ComplaintCategory, number> = {
+  security_vulnerability: 10,
+  reckless_practice: 8,
+  error_handling: 6,
+  bug_or_regression: 5,
+  missing_tests: 3,
+  maintainability: 2,
+};
 
 export interface Complaint {
   id: number;
   developer: string;
+  commit_sha: string;
+  category: ComplaintCategory;
+  weight: number;
   reason: string;
-  severity: Severity;
   created_at: string;
+}
+
+export interface FileComplaintResult {
+  complaint: Complaint;
+  created: boolean;
 }
 
 export interface Promotion {
@@ -34,11 +57,16 @@ export interface EmployeeRecord {
 
 export interface HrStats {
   totalComplaints: number;
+  totalWeight: number;
   totalPromotions: number;
   developersTracked: number;
-  mostComplainedAbout: string | null;
-  mostPromoted: string | null;
-  complaintsBySeverity: Record<Severity, number>;
+  mostComplainedAbout: {
+    developer: string;
+    count: number;
+    totalWeight: number;
+  } | null;
+  mostPromoted: { developer: string; count: number } | null;
+  complaintsByCategory: Record<ComplaintCategory, number>;
 }
 
 /** HR_DB_PATH env var if set (tests point it at a temp file), else .hr-data/hr.db. */
@@ -62,30 +90,126 @@ export class HrDatabase {
 
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
-    this.createTables();
+    this.ensureSchema();
   }
 
-  /** Create tables if they don't exist yet. Safe to call repeatedly. */
-  private createTables(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS complaints (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        developer  TEXT NOT NULL,
-        reason     TEXT NOT NULL,
-        severity   TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
+  /**
+   * Create v1 tables if they don't exist yet, or atomically migrate a legacy v0
+   * `complaints` table (which used free-form `severity` and had no `commit_sha`)
+   * into the v1 idempotent schema. Safe to call repeatedly.
+   */
+  private ensureSchema(): void {
+    const migrate = this.db.transaction(() => {
+      const existingCols = this.db
+        .prepare(`PRAGMA table_info(complaints)`)
+        .all() as { name: string }[];
 
-      CREATE TABLE IF NOT EXISTS promotions (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        developer  TEXT NOT NULL,
-        reason     TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
+      const hasComplaintsTable = existingCols.length > 0;
+      const hasV1Columns =
+        existingCols.some((c) => c.name === 'commit_sha') &&
+        existingCols.some((c) => c.name === 'category') &&
+        existingCols.some((c) => c.name === 'weight');
 
-      CREATE INDEX IF NOT EXISTS idx_complaints_dev ON complaints(developer);
-      CREATE INDEX IF NOT EXISTS idx_promotions_dev ON promotions(developer);
-    `);
+      if (!hasComplaintsTable) {
+        this.db.exec(`
+          CREATE TABLE complaints (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            developer  TEXT NOT NULL COLLATE NOCASE,
+            commit_sha TEXT NOT NULL,
+            category   TEXT NOT NULL CHECK (
+              category IN (
+                'security_vulnerability',
+                'reckless_practice',
+                'error_handling',
+                'bug_or_regression',
+                'missing_tests',
+                'maintainability'
+              )
+            ),
+            weight     INTEGER NOT NULL CHECK (weight > 0),
+            reason     TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(developer, commit_sha, category)
+          );
+        `);
+      } else if (!hasV1Columns) {
+        this.db.exec(`
+          CREATE TABLE complaints_v1 (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            developer  TEXT NOT NULL COLLATE NOCASE,
+            commit_sha TEXT NOT NULL,
+            category   TEXT NOT NULL CHECK (
+              category IN (
+                'security_vulnerability',
+                'reckless_practice',
+                'error_handling',
+                'bug_or_regression',
+                'missing_tests',
+                'maintainability'
+              )
+            ),
+            weight     INTEGER NOT NULL CHECK (weight > 0),
+            reason     TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(developer, commit_sha, category)
+          );
+
+          INSERT INTO complaints_v1 (
+            id,
+            developer,
+            commit_sha,
+            category,
+            weight,
+            reason,
+            created_at
+          )
+          SELECT
+            id,
+            TRIM(developer),
+            'legacy-' || printf('%06d', id),
+            CASE severity
+              WHEN 'legendary' THEN 'reckless_practice'
+              WHEN 'severe'    THEN 'error_handling'
+              WHEN 'moderate'  THEN 'maintainability'
+              WHEN 'minor'     THEN 'maintainability'
+              ELSE 'bug_or_regression'
+            END,
+            CASE severity
+              WHEN 'legendary' THEN 8
+              WHEN 'severe'    THEN 6
+              WHEN 'moderate'  THEN 2
+              WHEN 'minor'     THEN 2
+              ELSE 5
+            END,
+            reason,
+            created_at
+          FROM complaints;
+
+          DROP TABLE complaints;
+          ALTER TABLE complaints_v1 RENAME TO complaints;
+        `);
+      }
+
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS promotions (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          developer  TEXT NOT NULL COLLATE NOCASE,
+          reason     TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_complaints_dev
+          ON complaints(developer COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS idx_complaints_commit
+          ON complaints(commit_sha);
+        CREATE INDEX IF NOT EXISTS idx_promotions_dev
+          ON promotions(developer COLLATE NOCASE);
+
+        PRAGMA user_version = 1;
+      `);
+    });
+
+    migrate();
   }
 
   getEmployeeRecord(developer: string): EmployeeRecord {
@@ -93,7 +217,7 @@ export class HrDatabase {
 
     const complaints = this.db
       .prepare(
-        `SELECT id, developer, reason, severity, created_at
+        `SELECT id, developer, commit_sha, category, weight, reason, created_at
          FROM complaints WHERE developer = ? COLLATE NOCASE
          ORDER BY id DESC`,
       )
@@ -110,19 +234,48 @@ export class HrDatabase {
     return { developer: name, complaints, promotions };
   }
 
-  fileComplaint(developer: string, reason: string, severity: Severity): Complaint {
+  fileComplaint(
+    developer: string,
+    commitSha: string,
+    category: ComplaintCategory,
+    reason: string,
+  ): FileComplaintResult {
     const name = normalizeName(developer);
-    const info = this.db
-      .prepare(
-        `INSERT INTO complaints (developer, reason, severity) VALUES (?, ?, ?)`,
-      )
-      .run(name, reason.trim(), severity);
+    const sha = normalizeCommitSha(commitSha);
+    const cleanReason = reason.trim();
+    const weight = CATEGORY_WEIGHTS[category] ?? 0;
 
-    return this.db
-      .prepare(
-        `SELECT id, developer, reason, severity, created_at FROM complaints WHERE id = ?`,
-      )
-      .get(info.lastInsertRowid) as Complaint;
+    const tx = this.db.transaction((): FileComplaintResult => {
+      const info = this.db
+        .prepare(
+          `INSERT INTO complaints (developer, commit_sha, category, weight, reason)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(developer, commit_sha, category) DO NOTHING`,
+        )
+        .run(name, sha, category, weight, cleanReason);
+
+      if (info.changes === 1) {
+        const complaint = this.db
+          .prepare(
+            `SELECT id, developer, commit_sha, category, weight, reason, created_at
+             FROM complaints WHERE id = ?`,
+          )
+          .get(info.lastInsertRowid) as Complaint;
+        return { complaint, created: true };
+      }
+
+      const existing = this.db
+        .prepare(
+          `SELECT id, developer, commit_sha, category, weight, reason, created_at
+           FROM complaints
+           WHERE developer = ? COLLATE NOCASE AND commit_sha = ? AND category = ?`,
+        )
+        .get(name, sha, category) as Complaint;
+
+      return { complaint: existing, created: false };
+    });
+
+    return tx();
   }
 
   nominateForPromotion(developer: string, reason: string): Promotion {
@@ -139,11 +292,14 @@ export class HrDatabase {
   }
 
   getStats(): HrStats {
-    const totalComplaints = (
-      this.db.prepare(`SELECT COUNT(*) AS c FROM complaints`).get() as {
-        c: number;
-      }
-    ).c;
+    const totals = this.db
+      .prepare(
+        `SELECT COUNT(*) AS c, COALESCE(SUM(weight), 0) AS w FROM complaints`,
+      )
+      .get() as { c: number; w: number };
+
+    const totalComplaints = totals.c;
+    const totalWeight = totals.w;
 
     const totalPromotions = (
       this.db.prepare(`SELECT COUNT(*) AS c FROM promotions`).get() as {
@@ -155,61 +311,67 @@ export class HrDatabase {
       this.db
         .prepare(
           `SELECT COUNT(*) AS c FROM (
-             SELECT developer FROM complaints
+             SELECT LOWER(developer) AS dev FROM complaints
              UNION
-             SELECT developer FROM promotions
+             SELECT LOWER(developer) AS dev FROM promotions
            )`,
         )
         .get() as { c: number }
     ).c;
 
     const mostComplainedAbout =
-      (
-        this.db
-          .prepare(
-            `SELECT developer FROM complaints
-             GROUP BY developer ORDER BY COUNT(*) DESC LIMIT 1`,
-          )
-          .get() as { developer: string } | undefined
-      )?.developer ?? null;
+      (this.db
+        .prepare(
+          `SELECT developer, COUNT(*) AS count, SUM(weight) AS totalWeight
+           FROM complaints
+           GROUP BY developer COLLATE NOCASE
+           ORDER BY totalWeight DESC, count DESC, MIN(id) ASC
+           LIMIT 1`,
+        )
+        .get() as
+        | { developer: string; count: number; totalWeight: number }
+        | undefined) ?? null;
 
     const mostPromoted =
-      (
-        this.db
-          .prepare(
-            `SELECT developer FROM promotions
-             GROUP BY developer ORDER BY COUNT(*) DESC LIMIT 1`,
-          )
-          .get() as { developer: string } | undefined
-      )?.developer ?? null;
+      (this.db
+        .prepare(
+          `SELECT developer, COUNT(*) AS count
+           FROM promotions
+           GROUP BY developer COLLATE NOCASE
+           ORDER BY count DESC, MIN(id) ASC
+           LIMIT 1`,
+        )
+        .get() as { developer: string; count: number } | undefined) ?? null;
 
-    const severityRows = this.db
+    const categoryRows = this.db
       .prepare(
-        `SELECT severity, COUNT(*) AS c FROM complaints GROUP BY severity`,
+        `SELECT category, COUNT(*) AS c FROM complaints GROUP BY category`,
       )
-      .all() as { severity: Severity; c: number }[];
+      .all() as { category: ComplaintCategory; c: number }[];
 
-    const complaintsBySeverity = Object.fromEntries(
-      SEVERITIES.map((s) => [s, 0]),
-    ) as Record<Severity, number>;
-    for (const row of severityRows) {
-      complaintsBySeverity[row.severity] = row.c;
+    const complaintsByCategory = Object.fromEntries(
+      COMPLAINT_CATEGORIES.map((c) => [c, 0]),
+    ) as Record<ComplaintCategory, number>;
+    for (const row of categoryRows) {
+      complaintsByCategory[row.category] = row.c;
     }
 
     return {
       totalComplaints,
+      totalWeight,
       totalPromotions,
       developersTracked,
       mostComplainedAbout,
       mostPromoted,
-      complaintsBySeverity,
+      complaintsByCategory,
     };
   }
 
   allComplaints(): Complaint[] {
     return this.db
       .prepare(
-        `SELECT id, developer, reason, severity, created_at FROM complaints ORDER BY id DESC`,
+        `SELECT id, developer, commit_sha, category, weight, reason, created_at
+         FROM complaints ORDER BY id DESC`,
       )
       .all() as Complaint[];
   }
@@ -234,38 +396,34 @@ export class HrDatabase {
   seedDemoData(): void {
     this.reset();
 
-    const insertComplaint = this.db.prepare(
-      `INSERT INTO complaints (developer, reason, severity) VALUES (?, ?, ?)`,
-    );
-    const insertPromotion = this.db.prepare(
-      `INSERT INTO promotions (developer, reason) VALUES (?, ?)`,
-    );
-
     const seed = this.db.transaction(() => {
-      insertComplaint.run(
+      this.fileComplaint(
         'Dusty McLegacy',
+        'a1b2c3d',
+        'reckless_practice',
         'Pushed a 2,000-line "quick fix" directly to main on a Friday.',
-        'legendary',
       );
-      insertComplaint.run(
+      this.fileComplaint(
         'Dusty McLegacy',
+        'b2c3d4e',
+        'maintainability',
         'Named three different variables `data`, `data2`, and `dataFinal`.',
-        'moderate',
       );
-      insertComplaint.run(
+      this.fileComplaint(
         'Casey Nullpointer',
+        'c3d4e5f',
+        'error_handling',
         'Caught a NullPointerException and logged "lol".',
-        'severe',
       );
-      insertPromotion.run(
+      this.nominateForPromotion(
         'Ada Refactor',
         'Deleted 4,000 lines of dead code and the build got faster.',
       );
-      insertPromotion.run(
+      this.nominateForPromotion(
         'Ada Refactor',
         'Wrote tests before anyone asked. Unprompted. A legend.',
       );
-      insertPromotion.run(
+      this.nominateForPromotion(
         'Casey Nullpointer',
         'Actually added error handling this time. Growth.',
       );
@@ -282,4 +440,9 @@ export class HrDatabase {
 /** Trim and collapse whitespace in a developer name for consistent lookups. */
 function normalizeName(developer: string): string {
   return developer.trim().replace(/\s+/g, ' ');
+}
+
+/** Trim and lowercase a Git commit SHA for consistent deduplication keys. */
+function normalizeCommitSha(commitSha: string): string {
+  return commitSha.trim().toLowerCase();
 }

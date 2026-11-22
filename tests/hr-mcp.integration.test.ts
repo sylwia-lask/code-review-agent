@@ -2,7 +2,10 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { connectHrMcp, type HrMcpConnection } from '../src/mcp/hr-mcp-client.js';
+import {
+  connectHrMcp,
+  type HrMcpConnection,
+} from '../src/mcp/hr-mcp-client.js';
 
 /**
  * Real MCP client/server integration test — no mocks. connectHrMcp() spawns the
@@ -42,7 +45,10 @@ describe('HR MCP client/server integration', () => {
       expect(tool.isHrAction).toBe(true);
     }
     const complaint = hr.tools.find((t) => t.name === 'file_complaint');
-    expect(complaint?.parameters?.properties?.severity).toBeDefined();
+    expect(complaint?.parameters?.properties?.developer).toBeDefined();
+    expect(complaint?.parameters?.properties?.commit_sha).toBeDefined();
+    expect(complaint?.parameters?.properties?.category).toBeDefined();
+    expect(complaint?.parameters?.properties?.reason).toBeDefined();
   });
 
   it('files a complaint and reads it back through MCP (end to end)', async () => {
@@ -50,16 +56,40 @@ describe('HR MCP client/server integration', () => {
     const getRecord = tool('get_employee_record');
 
     const fileResult = await fileComplaint.execute({
-      developer: 'Dusty McLegacy',
+      developer: 'Sylwia',
+      commit_sha: '0c19058',
+      category: 'reckless_practice',
       reason: 'Committed node_modules again',
-      severity: 'legendary',
     });
-    expect(fileResult).toContain('Complaint');
-    expect(fileResult).toContain('Dusty McLegacy');
+    expect(fileResult).toContain('Complaint #1');
+    expect(fileResult).toContain('Sylwia');
+    expect(fileResult).toContain('reckless_practice');
+    expect(fileResult).toContain('weight=8');
+    expect(fileResult).toContain('0c19058');
 
-    const record = await getRecord.execute({ developer: 'Dusty McLegacy' });
+    const record = await getRecord.execute({ developer: 'Sylwia' });
     expect(record).toContain('Committed node_modules again');
-    expect(record).toContain('legendary');
+    expect(record).toContain('reckless_practice');
+    expect(record).toContain('weight=8');
+    expect(record).toContain('0c19058');
+  });
+
+  it('reuses the existing complaint idempotently on retry or re-run without creating a duplicate', async () => {
+    const fileComplaint = tool('file_complaint');
+    const retryResult = await fileComplaint.execute({
+      developer: 'sylwia',
+      commit_sha: '0C19058',
+      category: 'reckless_practice',
+      reason: 'Re-run 20 minutes later with different LLM phrasing',
+    });
+
+    expect(retryResult.startsWith('Error:')).toBe(false);
+    expect(retryResult).toContain('Idempotent match');
+    expect(retryResult).toContain('complaint #1');
+    expect(retryResult).toContain('weight=8');
+
+    const stats = await tool('get_hr_stats').execute({});
+    expect(stats).toContain('Total complaints:      1 (total weight: 8)');
   });
 
   it('nominates for promotion and reflects it in stats', async () => {
@@ -73,11 +103,12 @@ describe('HR MCP client/server integration', () => {
     expect(stats).toContain('Ada Refactor');
   });
 
-  it('returns a validation error (not a crash) for a bad severity', async () => {
+  it('returns a validation error (not a crash) for an invalid category', async () => {
     const result = await tool('file_complaint').execute({
       developer: 'Casey Nullpointer',
+      commit_sha: '0c19058',
+      category: 'apocalyptic', // not a valid enum value
       reason: 'This reason is fine',
-      severity: 'apocalyptic', // not a valid enum value
     });
 
     // MCP surfaces validation failures as isError results, which our client
@@ -85,11 +116,30 @@ describe('HR MCP client/server integration', () => {
     expect(result.toLowerCase()).toContain('error');
   });
 
+  it('returns a validation error for an invalid commit_sha format', async () => {
+    const nonHex = await tool('file_complaint').execute({
+      developer: 'Casey Nullpointer',
+      commit_sha: 'not-a-sha',
+      category: 'error_handling',
+      reason: 'Swallowed an exception in catch block',
+    });
+    expect(nonHex.toLowerCase()).toContain('error');
+
+    const tooShort = await tool('file_complaint').execute({
+      developer: 'Casey Nullpointer',
+      commit_sha: '12345', // fewer than 7 hex chars
+      category: 'error_handling',
+      reason: 'Swallowed an exception in catch block',
+    });
+    expect(tooShort.toLowerCase()).toContain('error');
+  });
+
   it('returns a validation error for a too-short reason', async () => {
     const result = await tool('file_complaint').execute({
       developer: 'Casey Nullpointer',
+      commit_sha: '0c19058',
+      category: 'maintainability',
       reason: 'x', // below the 5-char minimum
-      severity: 'minor',
     });
     expect(result.toLowerCase()).toContain('error');
   });
