@@ -27,11 +27,32 @@ export const CATEGORY_WEIGHTS: Record<ComplaintCategory, number> = {
   maintainability: 2,
 };
 
+/** A traditional Git commit SHA (short or full), e.g. from a closed-commit review. */
+export const COMMIT_SHA_PATTERN = /^[0-9a-f]{7,40}$/;
+
+/**
+ * A reviewed working-tree snapshot as emitted by getDiff:
+ * `<head_short>:<diff_sha256_prefix>` or `unborn:<diff_sha256_prefix>`.
+ */
+export const DIFF_SNAPSHOT_PATTERN =
+  /^(?:[0-9a-f]{7,40}|unborn):[0-9a-f]{16,64}$/;
+
+/** Valid `snapshot_id` input: either a diff snapshot or a plain Git commit SHA. */
+export const SNAPSHOT_ID_PATTERN =
+  /^(?:[0-9a-f]{7,40}|(?:[0-9a-f]{7,40}|unborn):[0-9a-f]{16,64})$/;
+
+/** Max stored length of a complaint `file_path`. */
+export const MAX_FILE_PATH_LENGTH = 300;
+
+/** Current on-disk schema version (stored in PRAGMA user_version). */
+export const SCHEMA_VERSION = 2;
+
 export interface Complaint {
   id: number;
   developer: string;
-  commit_sha: string;
+  snapshot_id: string;
   category: ComplaintCategory;
+  file_path: string;
   weight: number;
   reason: string;
   created_at: string;
@@ -69,6 +90,34 @@ export interface HrStats {
   complaintsByCategory: Record<ComplaintCategory, number>;
 }
 
+const COMPLAINT_COLUMNS = `id, developer, snapshot_id, category, file_path, weight, reason, created_at`;
+
+/** DDL for the v2 complaints table (used for fresh DBs and migrations). */
+function complaintsTableDdl(tableName: string): string {
+  return `
+    CREATE TABLE ${tableName} (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      developer   TEXT NOT NULL COLLATE NOCASE,
+      snapshot_id TEXT NOT NULL,
+      category    TEXT NOT NULL CHECK (
+        category IN (
+          'security_vulnerability',
+          'reckless_practice',
+          'error_handling',
+          'bug_or_regression',
+          'missing_tests',
+          'maintainability'
+        )
+      ),
+      file_path   TEXT NOT NULL DEFAULT '',
+      weight      INTEGER NOT NULL CHECK (weight > 0),
+      reason      TEXT NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(developer, snapshot_id, category, file_path)
+    );
+  `;
+}
+
 /** HR_DB_PATH env var if set (tests point it at a temp file), else .hr-data/hr.db. */
 export function resolveDbPath(): string {
   const fromEnv = process.env.HR_DB_PATH;
@@ -94,125 +143,43 @@ export class HrDatabase {
   }
 
   /**
-   * Create v1 tables if they don't exist yet, or atomically migrate a legacy v0
-   * `complaints` table (which used free-form `severity` and had no `commit_sha`)
-   * into the v1 idempotent schema. Safe to call repeatedly.
+   * Create v2 tables if they don't exist yet, or atomically migrate older
+   * `complaints` tables into the v2 schema inside a single transaction:
+   *   - v0: free-form `severity`, no `commit_sha` → mapped category + `legacy-NNNNNN` id
+   *   - v1: `commit_sha` + `UNIQUE(developer, commit_sha, category)` → `commit_sha`
+   *         copied verbatim into `snapshot_id`, `file_path = ''`
+   * Every existing row (ids included) is preserved. Safe to call repeatedly.
    */
   private ensureSchema(): void {
     const migrate = this.db.transaction(() => {
       const existingCols = this.db
         .prepare(`PRAGMA table_info(complaints)`)
         .all() as { name: string }[];
+      const has = (name: string) => existingCols.some((c) => c.name === name);
 
       const hasComplaintsTable = existingCols.length > 0;
-      const hasV1Columns =
-        existingCols.some((c) => c.name === 'commit_sha') &&
-        existingCols.some((c) => c.name === 'category') &&
-        existingCols.some((c) => c.name === 'weight');
+      const isV2 = has('snapshot_id') && has('file_path');
+      const isV1 = has('commit_sha') && has('category') && has('weight');
 
       if (!hasComplaintsTable) {
+        this.db.exec(complaintsTableDdl('complaints'));
+      } else if (isV2) {
+        // Already up to date.
+      } else if (isV1) {
+        this.db.exec(complaintsTableDdl('complaints_v2'));
         this.db.exec(`
-          CREATE TABLE complaints (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            developer  TEXT NOT NULL COLLATE NOCASE,
-            commit_sha TEXT NOT NULL,
-            category   TEXT NOT NULL CHECK (
-              category IN (
-                'security_vulnerability',
-                'reckless_practice',
-                'error_handling',
-                'bug_or_regression',
-                'missing_tests',
-                'maintainability'
-              )
-            ),
-            weight     INTEGER NOT NULL CHECK (weight > 0),
-            reason     TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            UNIQUE(developer, commit_sha, category)
-          );
-        `);
-      } else if (!hasV1Columns) {
-        const legacyRows = this.db
-          .prepare(
-            `SELECT id, developer, reason, severity, created_at FROM complaints ORDER BY id ASC`,
+          INSERT INTO complaints_v2 (
+            id, developer, snapshot_id, category, file_path, weight, reason, created_at
           )
-          .all() as {
-          id: number;
-          developer: string;
-          reason: string;
-          severity: string | null;
-          created_at: string;
-        }[];
+          SELECT id, developer, commit_sha, category, '', weight, reason, created_at
+          FROM complaints
+          ORDER BY id ASC;
 
-        this.db.exec(`
-          CREATE TABLE complaints_v1 (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            developer  TEXT NOT NULL COLLATE NOCASE,
-            commit_sha TEXT NOT NULL,
-            category   TEXT NOT NULL CHECK (
-              category IN (
-                'security_vulnerability',
-                'reckless_practice',
-                'error_handling',
-                'bug_or_regression',
-                'missing_tests',
-                'maintainability'
-              )
-            ),
-            weight     INTEGER NOT NULL CHECK (weight > 0),
-            reason     TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            UNIQUE(developer, commit_sha, category)
-          );
-        `);
-
-        const insertLegacy = this.db.prepare(`
-          INSERT INTO complaints_v1 (
-            id,
-            developer,
-            commit_sha,
-            category,
-            weight,
-            reason,
-            created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        `);
-
-        for (const row of legacyRows) {
-          const normalizedDev = normalizeName(row.developer) || 'Unknown';
-          const legacySha = `legacy-${String(row.id).padStart(6, '0')}`;
-          const sev = String(row.severity ?? '')
-            .trim()
-            .toLowerCase();
-          let category: ComplaintCategory;
-          if (sev === 'legendary') {
-            category = 'reckless_practice';
-          } else if (sev === 'severe') {
-            category = 'error_handling';
-          } else if (sev === 'moderate' || sev === 'minor') {
-            category = 'maintainability';
-          } else {
-            category = 'bug_or_regression';
-          }
-          const weight = CATEGORY_WEIGHTS[category];
-          const cleanReason = (row.reason ?? '').trim() || '(legacy complaint)';
-
-          insertLegacy.run(
-            row.id,
-            normalizedDev,
-            legacySha,
-            category,
-            weight,
-            cleanReason,
-            row.created_at,
-          );
-        }
-
-        this.db.exec(`
           DROP TABLE complaints;
-          ALTER TABLE complaints_v1 RENAME TO complaints;
+          ALTER TABLE complaints_v2 RENAME TO complaints;
         `);
+      } else {
+        this.migrateFromV0();
       }
 
       this.db.exec(`
@@ -225,16 +192,79 @@ export class HrDatabase {
 
         CREATE INDEX IF NOT EXISTS idx_complaints_dev
           ON complaints(developer COLLATE NOCASE);
-        CREATE INDEX IF NOT EXISTS idx_complaints_commit
-          ON complaints(commit_sha);
+        CREATE INDEX IF NOT EXISTS idx_complaints_snapshot
+          ON complaints(snapshot_id);
         CREATE INDEX IF NOT EXISTS idx_promotions_dev
           ON promotions(developer COLLATE NOCASE);
 
-        PRAGMA user_version = 1;
+        PRAGMA user_version = ${SCHEMA_VERSION};
       `);
     });
 
     migrate();
+  }
+
+  /** v0 (free-form `severity`, no commit identity) → v2. */
+  private migrateFromV0(): void {
+    const legacyRows = this.db
+      .prepare(
+        `SELECT id, developer, reason, severity, created_at FROM complaints ORDER BY id ASC`,
+      )
+      .all() as {
+      id: number;
+      developer: string;
+      reason: string;
+      severity: string | null;
+      created_at: string;
+    }[];
+
+    this.db.exec(complaintsTableDdl('complaints_v2'));
+
+    const insertLegacy = this.db.prepare(`
+      INSERT INTO complaints_v2 (
+        id, developer, snapshot_id, category, file_path, weight, reason, created_at
+      ) VALUES (?, ?, ?, ?, '', ?, ?, ?)
+    `);
+
+    for (const row of legacyRows) {
+      const normalizedDev = normalizeName(row.developer) || 'Unknown';
+      const legacyId = `legacy-${String(row.id).padStart(6, '0')}`;
+      const sev = String(row.severity ?? '')
+        .trim()
+        .toLowerCase();
+      let category: ComplaintCategory;
+      if (sev === 'legendary') {
+        category = 'reckless_practice';
+      } else if (sev === 'severe') {
+        category = 'error_handling';
+      } else if (sev === 'moderate' || sev === 'minor') {
+        category = 'maintainability';
+      } else {
+        category = 'bug_or_regression';
+      }
+      const weight = CATEGORY_WEIGHTS[category];
+      const cleanReason = (row.reason ?? '').trim() || '(legacy complaint)';
+
+      insertLegacy.run(
+        row.id,
+        normalizedDev,
+        legacyId,
+        category,
+        weight,
+        cleanReason,
+        row.created_at,
+      );
+    }
+
+    this.db.exec(`
+      DROP TABLE complaints;
+      ALTER TABLE complaints_v2 RENAME TO complaints;
+    `);
+  }
+
+  /** Current schema version recorded in the database file. */
+  getSchemaVersion(): number {
+    return this.db.pragma('user_version', { simple: true }) as number;
   }
 
   getEmployeeRecord(developer: string): EmployeeRecord {
@@ -242,7 +272,7 @@ export class HrDatabase {
 
     const complaints = this.db
       .prepare(
-        `SELECT id, developer, commit_sha, category, weight, reason, created_at
+        `SELECT ${COMPLAINT_COLUMNS}
          FROM complaints WHERE developer = ? COLLATE NOCASE
          ORDER BY id DESC`,
       )
@@ -259,20 +289,33 @@ export class HrDatabase {
     return { developer: name, complaints, promotions };
   }
 
+  /**
+   * File a complaint, idempotent per `(developer, snapshot_id, category, file_path)`.
+   *
+   * `snapshotId` is either a reviewed-diff snapshot (`<head_short>:<hash>`, as
+   * emitted by getDiff) or a plain Git commit SHA (for clients reviewing closed
+   * commits). Plain commit SHAs additionally deduplicate short ↔ full prefixes;
+   * diff snapshots must match exactly. Re-filing returns the existing record
+   * with `created: false`.
+   */
   fileComplaint(
     developer: string,
-    commitSha: string,
+    snapshotId: string,
     category: ComplaintCategory,
     reason: string,
+    filePath: string = '',
   ): FileComplaintResult {
     const name = normalizeName(developer);
     if (!name || name.length > 100) {
       throw new Error('developer name is required (1-100 characters)');
     }
 
-    const sha = normalizeCommitSha(commitSha);
-    if (!/^[0-9a-f]{7,40}$/.test(sha)) {
-      throw new Error('commit_sha must be a 7-40 character hex git SHA');
+    const snapshot = normalizeSnapshotId(snapshotId);
+    const isCommitSha = COMMIT_SHA_PATTERN.test(snapshot);
+    if (!isCommitSha && !DIFF_SNAPSHOT_PATTERN.test(snapshot)) {
+      throw new Error(
+        'snapshot_id must be a getDiff Reviewed Snapshot ID (<head_short>:<diff_hash>) or a 7-40 character hex git SHA',
+      );
     }
 
     const weight = CATEGORY_WEIGHTS[category];
@@ -285,65 +328,98 @@ export class HrDatabase {
       throw new Error('reason must be between 5 and 500 characters');
     }
 
+    const path = normalizeFilePath(filePath);
+    if (path.length > MAX_FILE_PATH_LENGTH) {
+      throw new Error(
+        `file_path must be at most ${MAX_FILE_PATH_LENGTH} characters`,
+      );
+    }
+
     const tx = this.db.transaction((): FileComplaintResult => {
-      const existing = this.db
-        .prepare(
-          `SELECT id, developer, commit_sha, category, weight, reason, created_at
-           FROM complaints
-           WHERE developer = ? COLLATE NOCASE
-             AND category = ?
-             AND (
-               commit_sha = ?
-               OR (
-                 commit_sha NOT GLOB 'legacy-*'
+      const existing = isCommitSha
+        ? // Plain commit SHA: also match stored short/full prefixes of the same
+          // commit, but only against stored ids that are pure hex (never legacy
+          // ids or `<head>:<hash>` diff snapshots).
+          (this.db
+            .prepare(
+              `SELECT ${COMPLAINT_COLUMNS}
+               FROM complaints
+               WHERE developer = ? COLLATE NOCASE
+                 AND category = ?
+                 AND file_path = ?
                  AND (
-                   (length(commit_sha) < length(?) AND substr(?, 1, length(commit_sha)) = commit_sha)
-                   OR
-                   (length(?) < length(commit_sha) AND substr(commit_sha, 1, length(?)) = ?)
+                   snapshot_id = ?
+                   OR (
+                     snapshot_id NOT GLOB '*[^0-9a-f]*'
+                     AND (
+                       (length(snapshot_id) < length(?) AND substr(?, 1, length(snapshot_id)) = snapshot_id)
+                       OR
+                       (length(?) < length(snapshot_id) AND substr(snapshot_id, 1, length(?)) = ?)
+                     )
+                   )
                  )
-               )
-             )
-           ORDER BY id ASC
-           LIMIT 1`,
-        )
-        .get(name, category, sha, sha, sha, sha, sha, sha) as
-        Complaint | undefined;
+               ORDER BY id ASC
+               LIMIT 1`,
+            )
+            .get(
+              name,
+              category,
+              path,
+              snapshot,
+              snapshot,
+              snapshot,
+              snapshot,
+              snapshot,
+              snapshot,
+            ) as Complaint | undefined)
+        : (this.db
+            .prepare(
+              `SELECT ${COMPLAINT_COLUMNS}
+               FROM complaints
+               WHERE developer = ? COLLATE NOCASE
+                 AND category = ?
+                 AND file_path = ?
+                 AND snapshot_id = ?
+               ORDER BY id ASC
+               LIMIT 1`,
+            )
+            .get(name, category, path, snapshot) as Complaint | undefined);
 
       if (existing) {
-        if (sha.length > existing.commit_sha.length) {
+        if (isCommitSha && snapshot.length > existing.snapshot_id.length) {
           this.db
-            .prepare(`UPDATE complaints SET commit_sha = ? WHERE id = ?`)
-            .run(sha, existing.id);
-          existing.commit_sha = sha;
+            .prepare(`UPDATE complaints SET snapshot_id = ? WHERE id = ?`)
+            .run(snapshot, existing.id);
+          existing.snapshot_id = snapshot;
         }
         return { complaint: existing, created: false };
       }
 
       const info = this.db
         .prepare(
-          `INSERT INTO complaints (developer, commit_sha, category, weight, reason)
-           VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(developer, commit_sha, category) DO NOTHING`,
+          `INSERT INTO complaints (developer, snapshot_id, category, file_path, weight, reason)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(developer, snapshot_id, category, file_path) DO NOTHING`,
         )
-        .run(name, sha, category, weight, cleanReason);
+        .run(name, snapshot, category, path, weight, cleanReason);
 
       if (info.changes === 1) {
         const complaint = this.db
-          .prepare(
-            `SELECT id, developer, commit_sha, category, weight, reason, created_at
-             FROM complaints WHERE id = ?`,
-          )
+          .prepare(`SELECT ${COMPLAINT_COLUMNS} FROM complaints WHERE id = ?`)
           .get(info.lastInsertRowid) as Complaint;
         return { complaint, created: true };
       }
 
       const fallbackExisting = this.db
         .prepare(
-          `SELECT id, developer, commit_sha, category, weight, reason, created_at
+          `SELECT ${COMPLAINT_COLUMNS}
            FROM complaints
-           WHERE developer = ? COLLATE NOCASE AND commit_sha = ? AND category = ?`,
+           WHERE developer = ? COLLATE NOCASE
+             AND snapshot_id = ?
+             AND category = ?
+             AND file_path = ?`,
         )
-        .get(name, sha, category) as Complaint;
+        .get(name, snapshot, category, path) as Complaint;
 
       return { complaint: fallbackExisting, created: false };
     });
@@ -450,10 +526,7 @@ export class HrDatabase {
 
   allComplaints(): Complaint[] {
     return this.db
-      .prepare(
-        `SELECT id, developer, commit_sha, category, weight, reason, created_at
-         FROM complaints ORDER BY id DESC`,
-      )
+      .prepare(`SELECT ${COMPLAINT_COLUMNS} FROM complaints ORDER BY id DESC`)
       .all() as Complaint[];
   }
 
@@ -486,9 +559,10 @@ export class HrDatabase {
       );
       this.fileComplaint(
         'Dusty McLegacy',
-        'b2c3d4e',
+        'b2c3d4e:9f86d081884c7d65',
         'maintainability',
         'Named three different variables `data`, `data2`, and `dataFinal`.',
+        'src/utils.ts',
       );
       this.fileComplaint(
         'Casey Nullpointer',
@@ -523,7 +597,20 @@ function normalizeName(developer: string): string {
   return developer.trim().replace(/\s+/g, ' ');
 }
 
-/** Trim and lowercase a Git commit SHA for consistent deduplication keys. */
-function normalizeCommitSha(commitSha: string): string {
-  return commitSha.trim().toLowerCase();
+/** Trim and lowercase a snapshot ID / Git commit SHA for consistent deduplication keys. */
+export function normalizeSnapshotId(snapshotId: string): string {
+  return snapshotId.trim().toLowerCase();
+}
+
+/**
+ * Normalize a repository-relative file path for deterministic dedup keys:
+ * trim, `\` → `/`, collapse repeated slashes, drop leading `./` and `/`.
+ * Case is preserved because Git paths are case-sensitive.
+ */
+export function normalizeFilePath(filePath: string | undefined): string {
+  return (filePath ?? '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/\/{2,}/g, '/')
+    .replace(/^(?:\/+|\.\/)+/, '');
 }

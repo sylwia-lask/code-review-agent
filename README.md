@@ -147,12 +147,12 @@ No agent rewrite, no hardcoded HR functions.
 
 ### The four tools
 
-| Tool                                                      | What it does                                                                                                                                        |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_employee_record(developer)`                          | Read a developer's complaints and promotions                                                                                                        |
-| `file_complaint(developer, commit_sha, category, reason)` | File an idempotent complaint categorized by offense type with a fixed server-assigned weight (deduplicated per `(developer, commit_sha, category)`) |
-| `nominate_for_promotion(developer, reason)`               | Record a positive achievement                                                                                                                       |
-| `get_hr_stats()`                                          | Department-wide statistics                                                                                                                          |
+| Tool                                                                  | What it does                                                                                                                                                                                                                  |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_employee_record(developer)`                                      | Read a developer's complaints and promotions                                                                                                                                                                                  |
+| `file_complaint(developer, snapshot_id, category, reason, file_path)` | File an idempotent complaint categorized by offense type with a fixed server-assigned weight (deduplicated per `(developer, snapshot_id, category, file_path)`; `snapshot_id` is getDiff's `Reviewed Snapshot ID` or a commit SHA) |
+| `nominate_for_promotion(developer, reason)`                           | Record a positive achievement                                                                                                                                                                                                 |
+| `get_hr_stats()`                                                      | Department-wide statistics                                                                                                                                                                                                    |
 
 ### Enable it
 
@@ -229,7 +229,7 @@ npx @modelcontextprotocol/inspector npx tsx hr-server/hr-server.ts
 
 It opens a browser UI where you can list the four tools, read their schemas, and
 call them by hand — for example `file_complaint` with an invalid `category` or
-malformed `commit_sha` to watch the validation error come back as an `isError`
+malformed `snapshot_id` to watch the validation error come back as an `isError`
 result.
 
 Prefer the terminal or a scriptable check? The same package ships a TUI and a

@@ -50,12 +50,48 @@ export interface HrMcpConnection {
 
 export interface ConnectHrMcpOptions {
   /**
-   * Optional HEAD commit SHA observed in the local repository. When set,
-   * client-side calls to `file_complaint` verify that the LLM's `commit_sha`
-   * matches (or is a 7..40 hex prefix of) the real local HEAD commit before
-   * forwarding the call to the MCP server.
+   * Optional identity of the code actually under review. When set, client-side
+   * calls to `file_complaint` verify the LLM's `snapshot_id` before forwarding
+   * the call to the MCP server, rejecting invented or stale identifiers.
+   *
+   * - A function is evaluated on every call (Steve passes
+   *   `getLastReviewedSnapshotId`, i.e. the `Reviewed Snapshot ID` emitted by
+   *   the latest getDiff run). If it returns undefined, filing is blocked until
+   *   getDiff has produced a snapshot.
+   * - A `<head_short>:<diff_hash>` snapshot must match exactly.
+   * - A plain commit SHA (for clients reviewing closed commits) also accepts
+   *   any 7..40 hex prefix of it.
    */
-  expectedCommitSha?: string;
+  expectedSnapshotId?: string | (() => string | undefined);
+}
+
+const PLAIN_COMMIT_SHA = /^[0-9a-f]{7,40}$/;
+
+/**
+ * Returns an error message if `provided` does not identify the expected
+ * reviewed snapshot, or undefined when the call may proceed.
+ */
+export function checkSnapshotId(
+  provided: unknown,
+  expected: string | undefined,
+): string | undefined {
+  const exp = expected?.trim().toLowerCase();
+  if (!exp) {
+    return 'Error: no reviewed snapshot is available yet. Call getDiff first and use its exact "Reviewed Snapshot ID".';
+  }
+  const got = typeof provided === 'string' ? provided.trim().toLowerCase() : '';
+  if (!got) {
+    // Let the MCP server's schema validation report the missing field.
+    return undefined;
+  }
+  const matches =
+    got === exp ||
+    (PLAIN_COMMIT_SHA.test(exp) &&
+      PLAIN_COMMIT_SHA.test(got) &&
+      (exp.startsWith(got) || got.startsWith(exp)));
+  return matches
+    ? undefined
+    : `Error: snapshot_id "${got}" does not match the reviewed snapshot "${exp}". Use the exact "Reviewed Snapshot ID" reported by getDiff.`;
 }
 
 /**
@@ -64,7 +100,7 @@ export interface ConnectHrMcpOptions {
  *
  * @param dbPath Optional SQLite path forwarded to the child via HR_DB_PATH
  *               (tests use it to point at a temp database).
- * @param options Optional client-side harness safeguards (such as `expectedCommitSha`).
+ * @param options Optional client-side harness safeguards (such as `expectedSnapshotId`).
  */
 export async function connectHrMcp(
   dbPath?: string,
@@ -88,11 +124,9 @@ export async function connectHrMcp(
 
   const { tools: mcpTools } = await client.listTools();
 
-  const expectedSha =
-    options?.expectedCommitSha &&
-    /^[0-9a-f]{7,40}$/i.test(options.expectedCommitSha.trim())
-      ? options.expectedCommitSha.trim().toLowerCase()
-      : undefined;
+  const expected = options?.expectedSnapshotId;
+  const resolveExpected = (): string | undefined =>
+    typeof expected === 'function' ? expected() : expected;
 
   const tools: Tool[] = mcpTools.map((mcpTool) => ({
     name: mcpTool.name,
@@ -100,19 +134,12 @@ export async function connectHrMcp(
     parameters: mcpInputSchemaToGemini(mcpTool.inputSchema),
     isHrAction: true,
     execute: async (toolArgs: Record<string, unknown>) => {
-      if (mcpTool.name === 'file_complaint' && expectedSha) {
-        const provided =
-          typeof toolArgs.commit_sha === 'string'
-            ? toolArgs.commit_sha.trim().toLowerCase()
-            : '';
-        if (
-          /^[0-9a-f]{7,40}$/.test(provided) &&
-          !(
-            expectedSha.startsWith(provided) || provided.startsWith(expectedSha)
-          )
-        ) {
-          return `Error: commit_sha "${provided}" does not match current HEAD commit "${expectedSha}". Use the exact HEAD Commit SHA reported by getDiff.`;
-        }
+      if (mcpTool.name === 'file_complaint' && expected !== undefined) {
+        const guardError = checkSnapshotId(
+          toolArgs.snapshot_id,
+          resolveExpected(),
+        );
+        if (guardError) return guardError;
       }
 
       const result = await client.callTool({

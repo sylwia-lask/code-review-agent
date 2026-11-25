@@ -49,14 +49,17 @@ function showRecords(db: HrDatabase): void {
   const complaintRows = complaints.map((c) => [
     String(c.id),
     c.developer,
-    c.commit_sha.slice(0, 7),
+    /^[0-9a-f]{7,40}$/.test(c.snapshot_id)
+      ? c.snapshot_id.slice(0, 7)
+      : c.snapshot_id,
     c.category,
+    truncate(c.file_path || '-', 32),
     String(c.weight),
     truncate(c.reason, 48),
     c.created_at,
   ]);
   printTable(
-    ['ID', 'Developer', 'Commit', 'Category', 'Wt', 'Reason', 'When'],
+    ['ID', 'Developer', 'Snapshot', 'Category', 'File', 'Wt', 'Reason', 'When'],
     complaintRows,
   );
 

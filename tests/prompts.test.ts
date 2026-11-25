@@ -15,12 +15,17 @@ describe('buildReviewerSystemPrompt', () => {
     expect(prompt).not.toContain('file_complaint');
   });
 
-  it('appends the HR addendum with HEAD Commit SHA rules and all 6 fixed categories when hrEnabled is true', () => {
+  it('appends the HR addendum with Reviewed Snapshot ID / file_path rules and all 6 fixed categories when hrEnabled is true', () => {
     const prompt = buildReviewerSystemPrompt({ hrEnabled: true });
 
     expect(prompt).toContain(HR_SYSTEM_PROMPT_ADDENDUM);
-    expect(prompt).toContain('"HEAD Commit SHA"');
-    expect(prompt).toContain('commit_sha');
+    expect(prompt).toContain('"Reviewed Snapshot ID"');
+    expect(prompt).toContain('snapshot_id');
+    expect(prompt).toContain('file_path');
+    expect(prompt).toContain('LITERALLY from the diff header');
+    expect(prompt).toContain('consolidate every finding in its reason');
+    expect(prompt).toContain('(developer, snapshot_id, category, file_path)');
+    expect(prompt).not.toContain('commit_sha');
     for (const category of COMPLAINT_CATEGORIES) {
       expect(prompt).toContain(category);
     }

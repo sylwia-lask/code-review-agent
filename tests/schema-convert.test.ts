@@ -85,7 +85,7 @@ describe('mcpInputSchemaToGemini', () => {
     expect(mcpInputSchemaToGemini('nope')).toBeUndefined();
   });
 
-  it('preserves complaint category enum and converts commit_sha with pattern to Gemini string schema', () => {
+  it('preserves complaint category enum and converts snapshot_id + optional file_path to Gemini string schemas', () => {
     const categories = [
       'security_vulnerability',
       'reckless_practice',
@@ -99,10 +99,15 @@ describe('mcpInputSchemaToGemini', () => {
       type: 'object',
       properties: {
         developer: { type: 'string', description: 'Developer name' },
-        commit_sha: {
+        snapshot_id: {
           type: 'string',
-          pattern: '^[0-9a-f]{7,40}$',
-          description: 'Git commit SHA (7-40 hex characters)',
+          pattern:
+            '^(?:[0-9a-f]{7,40}|(?:[0-9a-f]{7,40}|unborn):[0-9a-f]{16,64})$',
+          description: 'Reviewed Snapshot ID or Git commit SHA',
+        },
+        file_path: {
+          type: 'string',
+          description: 'Repository-relative path copied from the diff header',
         },
         category: {
           type: 'string',
@@ -111,19 +116,20 @@ describe('mcpInputSchemaToGemini', () => {
         },
         reason: { type: 'string', description: 'Concrete offense description' },
       },
-      required: ['developer', 'commit_sha', 'category', 'reason'],
+      required: ['developer', 'snapshot_id', 'category', 'reason'],
     });
 
     expect(result?.type).toBe(Type.OBJECT);
     expect(result?.properties?.category.type).toBe(Type.STRING);
     expect(result?.properties?.category.enum).toEqual(categories);
-    expect(result?.properties?.commit_sha.type).toBe(Type.STRING);
-    expect(result?.properties?.commit_sha.description).toBe(
-      'Git commit SHA (7-40 hex characters)',
+    expect(result?.properties?.snapshot_id.type).toBe(Type.STRING);
+    expect(result?.properties?.snapshot_id.description).toBe(
+      'Reviewed Snapshot ID or Git commit SHA',
     );
+    expect(result?.properties?.file_path.type).toBe(Type.STRING);
     expect(result?.required).toEqual([
       'developer',
-      'commit_sha',
+      'snapshot_id',
       'category',
       'reason',
     ]);

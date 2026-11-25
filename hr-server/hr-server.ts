@@ -2,8 +2,11 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
 import {
+  COMMIT_SHA_PATTERN,
   COMPLAINT_CATEGORIES,
   HrDatabase,
+  MAX_FILE_PATH_LENGTH,
+  SNAPSHOT_ID_PATTERN,
   type EmployeeRecord,
   type HrStats,
 } from './hr-db.js';
@@ -15,7 +18,8 @@ import {
  * tools backed by SQLite. There is deliberately NO AI / LLM code in here — the
  * server is pure data + validation. The "intelligence" (deciding when to file a
  * complaint) lives in the LLM on the client side, while policy (fixed category
- * weights and `(developer, commit_sha, category)` idempotency) is enforced here.
+ * weights and `(developer, snapshot_id, category, file_path)` idempotency) is
+ * enforced here.
  *
  * Tool descriptions are written for a comedic HR persona but are precise about
  * what each tool does, so the model uses them correctly.
@@ -59,10 +63,16 @@ export function createHrServer(db: HrDatabase): McpServer {
         'think swallowed exceptions, copy-pasted security holes, or a 500-line ' +
         'function named `doStuff`. Be fair: this is for real problems, not style ' +
         'nitpicks. Pick one of the fixed offense categories (the server assigns ' +
-        'its weight deterministically) and pass the reviewed Git `commit_sha`. ' +
-        'Idempotent per `(developer, commit_sha, category)`: re-filing the same ' +
-        'category on the same commit returns the existing record instead of ' +
-        'creating a duplicate.',
+        'its weight deterministically), pass the `snapshot_id` of the reviewed ' +
+        'code and the `file_path` of the offending file. ' +
+        'Idempotent per `(developer, snapshot_id, category, file_path)`: ' +
+        're-filing the same category for the same file in the same snapshot ' +
+        'returns the existing record instead of creating a duplicate. ' +
+        'Copy `file_path` LITERALLY from the diff header (the path after ' +
+        '`+++ b/`, without the `b/` prefix) — never a free-form slug or a line ' +
+        'number, which vary between runs and break deterministic idempotency. ' +
+        'If one file has several findings of the same category, file ONE ' +
+        'complaint for that file/category and consolidate all of them in `reason`.',
       inputSchema: z.object({
         developer: z
           .string()
@@ -72,16 +82,32 @@ export function createHrServer(db: HrDatabase): McpServer {
           .describe(
             'Name or handle of the developer who wrote the offending code.',
           ),
-        commit_sha: z
+        snapshot_id: z
           .string()
           .trim()
           .toLowerCase()
           .regex(
-            /^[0-9a-f]{7,40}$/,
-            'commit_sha must be a 7-40 character hex git SHA',
+            SNAPSHOT_ID_PATTERN,
+            'snapshot_id must be a getDiff Reviewed Snapshot ID (<head_short>:<diff_hash>) or a 7-40 character hex git SHA',
           )
           .describe(
-            'Git commit SHA (7-40 hex chars) being reviewed, used for idempotency.',
+            'Identity of the reviewed code, used for idempotency. Use the exact ' +
+              '"Reviewed Snapshot ID" reported by getDiff (format ' +
+              '`<head_short>:<diff_hash>`, a fingerprint of the full reviewed ' +
+              'diff). Clients reviewing a closed commit may pass its 7-40 char ' +
+              'hex Git commit SHA instead.',
+          ),
+        file_path: z
+          .string()
+          .trim()
+          .max(MAX_FILE_PATH_LENGTH)
+          .optional()
+          .default('')
+          .describe(
+            'Repository-relative path of the offending file, copied literally ' +
+              'from the diff header (e.g. `src/auth.ts` from `+++ b/src/auth.ts`). ' +
+              'No line numbers. Omit only for findings that are not tied to a ' +
+              'single file.',
           ),
         category: z
           .enum(COMPLAINT_CATEGORIES)
@@ -100,24 +126,29 @@ export function createHrServer(db: HrDatabase): McpServer {
           .min(5, 'give a real reason (at least 5 characters)')
           .max(500)
           .describe(
-            'Concrete description of the offense, ideally referencing file and line.',
+            'Concrete description of the offense (line numbers welcome here). ' +
+              'If the same file has several findings of this category, ' +
+              'consolidate all of them in this single reason.',
           ),
       }),
     },
-    async ({ developer, commit_sha, category, reason }) => {
+    async ({ developer, snapshot_id, file_path, category, reason }) => {
       const { complaint, created } = db.fileComplaint(
         developer,
-        commit_sha,
+        snapshot_id,
         category,
         reason,
+        file_path,
       );
-      const shortSha = complaint.commit_sha.slice(0, 7);
+      const where =
+        formatSnapshot(complaint.snapshot_id) +
+        (complaint.file_path ? ` in ${complaint.file_path}` : '');
 
       const text = created
         ? `📋 Complaint #${complaint.id} filed against ${complaint.developer} ` +
-          `[${complaint.category}, weight=${complaint.weight}] on ${shortSha}: ${complaint.reason}`
+          `[${complaint.category}, weight=${complaint.weight}] on ${where}: ${complaint.reason}`
         : `ℹ️ Idempotent match: complaint #${complaint.id} already exists for ` +
-          `${complaint.developer} on ${shortSha} [${complaint.category}, weight=${complaint.weight}]. ` +
+          `${complaint.developer} on ${where} [${complaint.category}, weight=${complaint.weight}]. ` +
           `Reused existing record without creating a duplicate.`;
 
       return {
@@ -191,6 +222,16 @@ export function createHrServer(db: HrDatabase): McpServer {
   return server;
 }
 
+/**
+ * Short display form of a snapshot identity: plain commit SHAs are shortened to
+ * 7 chars, `<head>:<hash>` diff snapshots and legacy ids are shown in full.
+ */
+function formatSnapshot(snapshotId: string): string {
+  return COMMIT_SHA_PATTERN.test(snapshotId)
+    ? snapshotId.slice(0, 7)
+    : snapshotId;
+}
+
 function formatRecord(record: EmployeeRecord): string {
   const lines: string[] = [`HR file for ${record.developer}:`];
 
@@ -205,7 +246,7 @@ function formatRecord(record: EmployeeRecord): string {
   } else {
     for (const c of record.complaints) {
       lines.push(
-        `    - #${c.id} [${c.category}, weight=${c.weight}] (${c.commit_sha.slice(0, 7)}) ${c.reason} (${c.created_at})`,
+        `    - #${c.id} [${c.category}, weight=${c.weight}] (${formatSnapshot(c.snapshot_id)}${c.file_path ? ` ${c.file_path}` : ''}) ${c.reason} (${c.created_at})`,
       );
     }
   }

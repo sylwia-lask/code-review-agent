@@ -1,9 +1,8 @@
 import 'dotenv/config';
-import { execSync } from 'child_process';
 import { GeminiProvider } from './gemini-provider.js';
 import { runAgent } from './agent.js';
 import { buildReviewerSystemPrompt } from './prompts.js';
-import { getDiffTool } from './tools/get-diff.js';
+import { getDiffTool, getLastReviewedSnapshotId } from './tools/get-diff.js';
 import { getFileTool } from './tools/get-file.js';
 import { listFilesTool } from './tools/list-files.js';
 import { connectHrMcp, type HrMcpConnection } from './mcp/hr-mcp-client.js';
@@ -40,18 +39,10 @@ async function main() {
 
   if (hrEnabled) {
     try {
-      let currentHeadSha: string | undefined;
-      try {
-        currentHeadSha = execSync('git rev-parse HEAD', {
-          encoding: 'utf-8',
-          stdio: ['ignore', 'pipe', 'ignore'],
-        }).trim();
-      } catch {
-        currentHeadSha = undefined;
-      }
-
+      // Guard file_complaint against invented/stale identities: the LLM must
+      // pass the exact Reviewed Snapshot ID produced by its latest getDiff call.
       hr = await connectHrMcp(undefined, {
-        expectedCommitSha: currentHeadSha,
+        expectedSnapshotId: getLastReviewedSnapshotId,
       });
       tools = [...baseTools, ...hr.tools];
       console.log(
